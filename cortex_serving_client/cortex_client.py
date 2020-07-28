@@ -26,15 +26,18 @@ CORTEX_DELETE_TIMEOUT_SEC = 10 * 60
 CORTEX_DEPLOY_REPORTED_TIMEOUT_SEC = 60
 CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT = 15 * 60
 CORTEX_DEFAULT_API_TIMEOUT = CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT
+INFINITE_TIMEOUT_SEC = 30 * 365 * 24 * 60 * 60  # 30 years
 
 
 logger = logging.getLogger(__name__)
-
-# Singleton CortexClient instance
 __cortex_client_instance = None
 
 
 class CortexClient:
+    """
+    An object used to execute commands on Cortex, maintain API state in the db to collect garbage.
+    """
+
     def __init__(self, db_connection_pool: ThreadedConnectionPool, gc_interval_sec=15 * 60, cortex_env="aws"):
         self.db_connection_pool = db_connection_pool
         self._init_garbage_api_collector(gc_interval_sec)
@@ -47,7 +50,32 @@ class CortexClient:
         deployment_timeout_sec=CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT,
         api_timeout_sec=CORTEX_DEFAULT_API_TIMEOUT,
         print_logs=False,
-    ):
+    ) -> 'CortexGetResult':
+        """
+        Deploy an API until timeouts. Cortex docs https://docs.cortex.dev/deployments/deployment.
+
+        Parameters
+        ----------
+
+        deployment
+            Cortex deployment config. See https://docs.cortex.dev/deployments/api-configuration
+        dir
+            Base directory of code to deploy to Cortex.
+        deployment_timeout_sec
+            Time to keep the API deploying. Including execution of predictor's `__init__`,
+            which can be used to e.g. train a model.
+        api_timeout_sec
+            Time until API will be auto-deleted. Use `INFINITE_TIMEOUT_SEC` for infinite.
+        print_logs
+            Subscribe to Cortex logs of the API and print them to stdout.
+
+        Returns
+        -------
+        get_result
+            Deployed API get result information.
+
+        """
+
         name = deployment["name"]
         predictor_yaml_str = yaml.dump([deployment], default_flow_style=False)
 
@@ -106,7 +134,32 @@ class CortexClient:
         deployment_timeout_sec=CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT,
         api_timeout_sec=CORTEX_DEFAULT_API_TIMEOUT,
         print_logs=False,
-    ):
+    ) -> 'CortexGetResult':
+        """
+        Deploy an API until timeouts. Cortex docs https://docs.cortex.dev/deployments/deployment.
+
+        Parameters
+        ----------
+
+        deployment
+            Cortex deployment config. See https://docs.cortex.dev/deployments/api-configuration
+        dir
+            Base directory of code to deploy to Cortex.
+        deployment_timeout_sec
+            Time to keep the API deploying. Including execution of predictor's `__init__`,
+            which can be used to e.g. train a model.
+        api_timeout_sec
+            Time until API will be auto-deleted. Use `INFINITE_TIMEOUT_SEC` for infinite.
+        print_logs
+            Subscribe to Cortex logs of the API and print them to stdout.
+
+        Returns
+        -------
+        get_result
+            Deployed API get result information.
+
+        """
+
         try:
             yield self.deploy_single(deployment, dir, deployment_timeout_sec, api_timeout_sec, print_logs)
 
@@ -188,7 +241,7 @@ class CortexClient:
         def listen_on_logs():
             os.system("cortex logs " + name + " " + f"--env={self.cortex_env}")
 
-        worker = LogThread(target=listen_on_logs)
+        worker = LogThread(target=listen_on_logs, daemon=True)
         worker.start()
 
     @staticmethod
@@ -278,7 +331,7 @@ class CortexClient:
                 """
                 )
 
-        self.looping_thread = LogThread(target=lambda: self._start_gc_loop(interval_sec))
+        self.looping_thread = LogThread(target=lambda: self._start_gc_loop(interval_sec), daemon=True)
         self.looping_thread.start()
 
     def _start_gc_loop(self, interval_sec):
@@ -369,9 +422,30 @@ def str_to_public_temp_file(string: str, filepath: str) -> str:
     os.remove(filepath)
 
 
-def get_cortex_client_instance(db_connection_pool: ThreadedConnectionPool, gc_interval_sec=15 * 60, cortex_env="aws"):
+def get_cortex_client_instance_with_pool(db_connection_pool: ThreadedConnectionPool, gc_interval_sec=15 * 60, cortex_env="aws"):
     global __cortex_client_instance
-    if __cortex_client_instance is None:
-        __cortex_client_instance = CortexClient(db_connection_pool, gc_interval_sec, cortex_env)
+    if __cortex_client_instance is not None:
+        return __cortex_client_instance
 
-    return __cortex_client_instance
+    else:
+        __cortex_client_instance = CortexClient(db_connection_pool, gc_interval_sec, cortex_env)
+        return __cortex_client_instance
+
+
+def get_cortex_client_instance(pg_user, pg_password, pg_db, pg_host='127.0.0.1', pg_port='5432', min_conn=0, max_conn=3, gc_interval_sec=15 * 60, cortex_env="aws"):
+    global __cortex_client_instance
+    if __cortex_client_instance is not None:
+        return __cortex_client_instance
+
+    else:
+        pg_user = os.environ.get("CORTEX_CLIENT_USERNAME", pg_user)
+        pg_password = os.environ.get("CORTEX_CLIENT_PASSWORD", pg_password)
+        pg_host = os.environ.get("CORTEX_CLIENT_HOSTNAME", pg_host)
+        pg_port = os.environ.get("CORTEX_CLIENT_PORT", pg_port)
+        pg_db = os.environ.get("CORTEX_CLIENT_DATABASE", pg_db)
+        db_connection_pool = ThreadedConnectionPool(minconn=min_conn, maxconn=max_conn, user=pg_user, password=pg_password,
+                                                    host=pg_host, port=pg_port,
+                                                    database=pg_db, cursor_factory=NamedTupleCursor)
+
+        __cortex_client_instance = CortexClient(db_connection_pool, gc_interval_sec, cortex_env)
+        return __cortex_client_instance
