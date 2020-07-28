@@ -11,6 +11,7 @@ from typing import NamedTuple, Optional, Dict, List, Callable
 
 import yaml
 from psycopg2._psycopg import DatabaseError
+from psycopg2.extras import NamedTupleCursor
 from psycopg2.pool import ThreadedConnectionPool
 
 from cortex_serving_client.log_thread import LogThread
@@ -28,6 +29,7 @@ CORTEX_DEFAULT_API_TIMEOUT = CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT
 
 
 logger = logging.getLogger(__name__)
+__cortex_client_instance = None
 
 
 class CortexClient:
@@ -184,7 +186,7 @@ class CortexClient:
         def listen_on_logs():
             os.system("cortex logs " + name + " " + f"--env={self.cortex_env}")
 
-        worker = LogThread(target=listen_on_logs)
+        worker = LogThread(target=listen_on_logs, daemon=True)
         worker.start()
 
     @staticmethod
@@ -274,7 +276,7 @@ class CortexClient:
                 """
                 )
 
-        self.looping_thread = LogThread(target=lambda: self._start_gc_loop(interval_sec))
+        self.looping_thread = LogThread(target=lambda: self._start_gc_loop(interval_sec), daemon=True)
         self.looping_thread.start()
 
     def _start_gc_loop(self, interval_sec):
@@ -365,9 +367,30 @@ def str_to_public_temp_file(string: str, filepath: str) -> str:
     os.remove(filepath)
 
 
-def get_cortex_client_instance(db_connection_pool: ThreadedConnectionPool, gc_interval_sec=15 * 60, cortex_env="aws"):
+def get_cortex_client_instance_with_pool(db_connection_pool: ThreadedConnectionPool, gc_interval_sec=15 * 60, cortex_env="aws"):
     global __cortex_client_instance
-    if __cortex_client_instance is None:
-        __cortex_client_instance = CortexClient(db_connection_pool, gc_interval_sec, cortex_env)
+    if __cortex_client_instance is not None:
+        return __cortex_client_instance
 
-    return __cortex_client_instance
+    else:
+        __cortex_client_instance = CortexClient(db_connection_pool, gc_interval_sec, cortex_env)
+        return __cortex_client_instance
+
+
+def get_cortex_client_instance(pg_user, pg_password, pg_db, pg_host='127.0.0.1', pg_port='5432', min_conn=0, max_conn=3, gc_interval_sec=15 * 60, cortex_env="aws"):
+    global __cortex_client_instance
+    if __cortex_client_instance is not None:
+        return __cortex_client_instance
+
+    else:
+        pg_user = os.environ.get("CORTEX_CLIENT_USERNAME", pg_user)
+        pg_password = os.environ.get("CORTEX_CLIENT_PASSWORD", pg_password)
+        pg_host = os.environ.get("CORTEX_CLIENT_HOSTNAME", pg_host)
+        pg_port = os.environ.get("CORTEX_CLIENT_PORT", pg_port)
+        pg_db = os.environ.get("CORTEX_CLIENT_DATABASE", pg_db)
+        db_connection_pool = ThreadedConnectionPool(minconn=min_conn, maxconn=max_conn, user=pg_user, password=pg_password,
+                                                    host=pg_host, port=pg_port,
+                                                    database=pg_db, cursor_factory=NamedTupleCursor)
+
+        __cortex_client_instance = CortexClient(db_connection_pool, gc_interval_sec, cortex_env)
+        return __cortex_client_instance
