@@ -11,7 +11,6 @@ from typing import NamedTuple, Optional, Dict, List, Callable
 
 import yaml
 from psycopg2._psycopg import DatabaseError
-from psycopg2.extras import NamedTupleCursor
 from psycopg2.pool import ThreadedConnectionPool
 
 from cortex_serving_client.log_thread import LogThread
@@ -29,9 +28,6 @@ CORTEX_DEFAULT_API_TIMEOUT = CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT
 
 
 logger = logging.getLogger(__name__)
-
-# Singleton CortexClient instance
-__cortex_client_instance = None
 
 
 class CortexClient:
