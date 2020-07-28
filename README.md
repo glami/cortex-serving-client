@@ -4,8 +4,8 @@ Python ML Serving Client for [Cortex.dev](https://cortex.dev) with garbage API c
 
 - Control your Cortex cluster from Python. 
 - Prevent accidental charges caused by forgotten APIs by setting a timeout.
-
-Supported operations: deploy, delete, get, get all.
+- Supported operations: deploy, delete, get, get all.
+- Supported Cortex Version: 0.17
 
 ## TODO: Example
 
