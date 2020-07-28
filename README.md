@@ -7,7 +7,32 @@ Python ML Serving Client for [Cortex.dev](https://cortex.dev) with garbage API c
 - Supported operations: deploy, delete, get, get all.
 - Supported Cortex Version: 0.17
 
-## Example
+Sample:
+```python
+deployment = dict(
+    name='dummy-api',
+    predictor=dict(
+        type='python',
+        path='dummy_predictor.py',
+    ),
+    compute=dict(
+        cpu=1,
+    )
+)
+
+with cortex.deploy_temporarily(
+        deployment,
+        dir="./",
+        api_timeout_sec=10 * 60,
+        print_logs=True,
+) as get_result:
+    result = post(get_result.endpoint, json={}).json()
+
+assert result['yes']
+```
+
+## Try it out
+This tutorial will help you to get [the basic example](/integration_test/integration_test.py) running under 15 minutes.
 
 ### Pre-requisites
 - Linux OS
@@ -37,25 +62,3 @@ and run [test script](/integration_test/integration_test.py).
 Please wait couple a minutes at first as Docker images need to be downloaded for the first time.
 Main part of the code is:
 
-```python
-deployment = dict(
-    name='dummy-api',
-    predictor=dict(
-        type='python',
-        path='dummy_predictor.py',
-    ),
-    compute=dict(
-        cpu=1,
-    )
-)
-
-with cortex.deploy_temporarily(
-        deployment,
-        dir="./",
-        api_timeout_sec=10 * 60,
-        print_logs=True,
-) as get_result:
-    result = post(get_result.endpoint, json={}).json()
-
-assert result['yes']
-```
