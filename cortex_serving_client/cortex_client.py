@@ -26,6 +26,7 @@ CORTEX_DELETE_TIMEOUT_SEC = 10 * 60
 CORTEX_DEPLOY_REPORTED_TIMEOUT_SEC = 60
 CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT = 15 * 60
 CORTEX_DEFAULT_API_TIMEOUT = CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT
+INFINITE_TIMEOUT_SEC = 30 * 365 * 24 * 60 * 60  # 30 years
 
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,10 @@ __cortex_client_instance = None
 
 
 class CortexClient:
+    """
+    An object used to execute commands on Cortex, maintain API state in the db to collect garbage.
+    """
+
     def __init__(self, db_connection_pool: ThreadedConnectionPool, gc_interval_sec=15 * 60, cortex_env="aws"):
         self.db_connection_pool = db_connection_pool
         self._init_garbage_api_collector(gc_interval_sec)
@@ -45,7 +50,32 @@ class CortexClient:
         deployment_timeout_sec=CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT,
         api_timeout_sec=CORTEX_DEFAULT_API_TIMEOUT,
         print_logs=False,
-    ):
+    ) -> 'CortexGetResult':
+        """
+        Deploy an API until timeouts. Cortex docs https://docs.cortex.dev/deployments/deployment.
+
+        Parameters
+        ----------
+
+        deployment
+            Cortex deployment config. See https://docs.cortex.dev/deployments/api-configuration
+        dir
+            Base directory of code to deploy to Cortex.
+        deployment_timeout_sec
+            Time to keep the API deploying. Including execution of predictor's `__init__`,
+            which can be used to e.g. train a model.
+        api_timeout_sec
+            Time until API will be auto-deleted. Use `INFINITE_TIMEOUT_SEC` for infinite.
+        print_logs
+            Subscribe to Cortex logs of the API and print them to stdout.
+
+        Returns
+        -------
+        get_result
+            Deployed API get result information.
+
+        """
+
         name = deployment["name"]
         predictor_yaml_str = yaml.dump([deployment], default_flow_style=False)
 
@@ -104,7 +134,32 @@ class CortexClient:
         deployment_timeout_sec=CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT,
         api_timeout_sec=CORTEX_DEFAULT_API_TIMEOUT,
         print_logs=False,
-    ):
+    ) -> 'CortexGetResult':
+        """
+        Deploy an API until timeouts. Cortex docs https://docs.cortex.dev/deployments/deployment.
+
+        Parameters
+        ----------
+
+        deployment
+            Cortex deployment config. See https://docs.cortex.dev/deployments/api-configuration
+        dir
+            Base directory of code to deploy to Cortex.
+        deployment_timeout_sec
+            Time to keep the API deploying. Including execution of predictor's `__init__`,
+            which can be used to e.g. train a model.
+        api_timeout_sec
+            Time until API will be auto-deleted. Use `INFINITE_TIMEOUT_SEC` for infinite.
+        print_logs
+            Subscribe to Cortex logs of the API and print them to stdout.
+
+        Returns
+        -------
+        get_result
+            Deployed API get result information.
+
+        """
+
         try:
             yield self.deploy_single(deployment, dir, deployment_timeout_sec, api_timeout_sec, print_logs)
 
