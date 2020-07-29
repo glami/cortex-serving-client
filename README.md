@@ -1,9 +1,10 @@
-# Python-Cortex-Serving-Client
+# Python Cortex Serving Client
 
-Python ML Serving Client for [Cortex.dev](https://cortex.dev) with garbage API collection.
+Python Cortex Serving Client makes serving automation simple.
+It is a Python wrapper around [Cortex's command-line client](https://cortex.dev) that provides garbage API collection.
 
-- Control your Cortex cluster from Python. 
-- Prevent accidental charges caused by forgotten APIs by setting a timeout.
+- Control your Cortex cluster from Python.
+- Prevent accidental charges by auto-removing APIs exceeding a timeout.
 - Supported operations: deploy, delete, get, get all.
 - Supported Cortex Version: 0.17
 
@@ -43,7 +44,7 @@ We use this project to automate deployment to auto-scalable AWS instances.
 The deployment management is part of application-specific Flask applications,
 which call to Python-Cortex-Serving-Client to command environment-dedicated Cortex cluster.
 
-In cases where multiple environments share single cluster, a shared Cortex database Postgres instance is required.
+In cases where multiple environments a share single cluster, a shared Cortex database Postgres instance is required.
 
 ## Try it out
 This tutorial will help you to get [the basic example](/integration_test/integration_test.py) running under 15 minutes.
