@@ -6,7 +6,7 @@ It is a Python wrapper around [Cortex's command-line client](https://cortex.dev)
 - Control your Cortex cluster from Python.
 - Prevent accidental charges by auto-removing APIs exceeding a timeout.
 - Supported operations: deploy, delete, get, get all.
-- Supported Cortex Version: 0.17
+- Supported Cortex Version: 0.17.
 
 [Sample](/integration_test/integration_test.py):
 ```python
