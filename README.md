@@ -68,9 +68,9 @@ and re-configure db in [the test script](/integration_test/integration_test.py).
 ```bash
 sudo su postgres;
 psql postgres postgres;
-CREATE DATABASE cortex_test;
+create database cortex_test;
 create role cortex_test login password 'cortex_test';
-GRANT ALL PRIVILEGES ON DATABASE cortext_test to cortex_test;
+grant all privileges on database cortext_test to cortex_test;
 ```
 
 This example runs in a simulated local cluster in docker. 
