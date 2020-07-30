@@ -1,3 +1,7 @@
 requests==2.23.0
+
+# PyPI distribution requirements
+#  How to here: https://packaging.python.org/guides/distributing-packages-using-setuptools/
 setuptools==49.2.0
 wheel==0.34.2
+twine==3.2.0
