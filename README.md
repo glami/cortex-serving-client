@@ -8,6 +8,12 @@ It is a Python wrapper around [Cortex's command-line client](https://cortex.dev)
 - Supported operations: deploy, delete, get, get all.
 - Supported Cortex Version: 0.17.
 
+## How it works
+
+After implementing your predictor project in a folder `dir`,
+you can deploy it to your Cortex cluster,
+and execute a prediction via a POST request.
+
 [Sample](/integration_test/integration_test.py):
 ```python
 deployment = dict(
@@ -46,7 +52,7 @@ which call to Python-Cortex-Serving-Client to command environment-dedicated Cort
 
 In cases where multiple environments share a single cluster, a shared Cortex database Postgres instance is required.
 
-## Try it out
+## Get started 
 This tutorial will help you to get [the basic example](/integration_test/integration_test.py) running under 15 minutes.
 
 ### Pre-requisites
@@ -82,3 +88,5 @@ and run [the test script](/integration_test/integration_test.py).
 
 Please wait a couple minutes as Docker images of the Cortex instances need to be downloaded and cached at least once.
 
+## Contact us
+Submit an issue or a pull request if you have any problems or need an extra feature.
