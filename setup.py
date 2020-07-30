@@ -14,7 +14,7 @@ setuptools.setup(
     description="Cortex.dev ML Serving Client for Python with garbage API collection.",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/glami/python-cortex-serving-client",
+    url="https://github.com/glami/cortex-serving-client",
     packages=setuptools.find_packages(exclude=("test*",)), install_requires=reqs,
     classifiers=[
         "Programming Language :: Python :: 3",
