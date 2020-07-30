@@ -1,2 +1,5 @@
 /.idea
 __pycache__
+/build
+/cortex_serving_client.egg-info
+/dist
