@@ -14,7 +14,7 @@ After implementing your predictor project in a folder `dir`,
 you can deploy it to your Cortex cluster,
 and execute a prediction via a POST request.
 
-[Sample](/integration_test/integration_test.py):
+[Working example](/integration_test/integration_test.py):
 ```python
 deployment = dict(
     name='dummy-api',
@@ -55,12 +55,10 @@ In cases where multiple environments share a single cluster, a shared Cortex dat
 ## Get started 
 This tutorial will help you to get [the basic example](/integration_test/integration_test.py) running under 15 minutes.
 
-### Pre-requisites
+Pre-requisites:
 - Linux OS
 - Docker
 - Postgres
-
-### Example
 
 Install supported [Cortex.dev](https://cortex.dev) version:
 ```bash
