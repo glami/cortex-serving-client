@@ -105,10 +105,6 @@ class CortexClient:
         while True:
             get_result = self.get(name)
             if get_result.status not in ("live", "updating"):
-                if self.cortex_env != "local":
-                    # dump debug info
-                    os.system(f"cortex cluster info --yes --debug --env={self.cortex_env}")
-
                 # avoids boot loop
                 self.delete(name)
                 raise ValueError(f"Deployment failed with status {get_result.status}.")
