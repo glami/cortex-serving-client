@@ -16,7 +16,7 @@ After implementing your predictor module in a folder (`dummy_dir` in below),
 you can deploy it to your Cortex cluster,
 and execute a prediction via a POST request.
 
-[Working example](/integration_test/integration_test.py):
+[Working example](/example/example.py):
 ```python
 deployment = dict(
     name='dummy-api',
@@ -53,7 +53,7 @@ which call to Python-Cortex-Serving-Client to command environment-dedicated Cort
 In cases where multiple environments share a single cluster, a shared Cortex database Postgres instance is required.
 
 ## Get started 
-This tutorial will help you to get [the basic example](/integration_test/integration_test.py) running under 15 minutes.
+This tutorial will help you to get [the basic example](/example/example.py) running under 15 minutes.
 
 Pre-requisites:
 - Linux OS
@@ -68,7 +68,7 @@ bash -c "$(curl -sS https://raw.githubusercontent.com/cortexlabs/cortex/0.17/get
 
 Follow below instuctions to configure local database,
 or configure cluster database,
-and re-configure db in [the test script](/integration_test/integration_test.py). 
+and re-configure db in [the example script](/example/example.py). 
 
 ```bash
 sudo su postgres;
@@ -79,10 +79,10 @@ grant all privileges on database cortext_test to cortex_test;
 ```
 
 This example runs in a simulated local cluster in docker. To execute it in an AWS cluster, follow [this Cortex tutorial](https://docs.cortex.dev/install#running-at-scale-on-aws),
-and then change `cortex_env` from `'local'` with `'aws'` in the [the test script](/integration_test/integration_test.py).
+and then change `cortex_env` from `'local'` with `'aws'` in the [the test script](/example/example.py).
 You may be required to add your user into docker group and then re-login.
 
-The deployment and prediction example resides in [the test script](/integration_test/integration_test.py).
+The deployment and prediction example resides in [the example script](/example/example.py).
 Make sure you have created a virtual environment, and installed requirements in `requirements.txt` and `requirements-dev.txt`, 
 before you execute it. Please be ready to wait a couple of minutes for the first time as Docker images of the Cortex instances need to be downloaded and cached.
 
