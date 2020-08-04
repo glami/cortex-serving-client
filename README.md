@@ -98,7 +98,7 @@ You may be required to add your user into docker group and then re-login.
 
 The deployment and prediction example resides in [the example script](/example/example.py).
 Make sure you have created a virtual environment, and installed requirements in `requirements.txt` and `requirements-dev.txt`, 
-before you execute it. Please be ready to wait a couple of minutes for the first time as Docker images of the Cortex instances need to be downloaded and cached.
+before you execute it. Please be ready to wait a couple of minutes during the first run as Cortex Docker instance images need to be downloaded and cached.
 
 ## Contact Us
 [Submit an issue](https://github.com/glami/cortex-serving-client/issues) or a pull request if you have any problems or need an extra feature.
