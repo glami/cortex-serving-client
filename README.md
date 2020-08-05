@@ -1,6 +1,6 @@
 # Cortex Serving Client
 
-<img src="https://raw.githubusercontent.com/glami/cortex-serving-client/master/cortex-serving-client.png" alt="Cortex Serving Client">
+<img src="https://raw.githubusercontent.com/glami/cortex-serving-client/master/cortex-serving-client-2.svg" alt="Cortex Serving Client" style="max-width: 200px">
 
 Cortex Serving Client makes Python serving automation simple.
 It is a Python wrapper around [Cortex's command-line client](https://cortex.dev) that provides garbage API collection.
