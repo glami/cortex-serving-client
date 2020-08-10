@@ -21,9 +21,7 @@ Warning: Below is an experimental version. Automation will be added later.
 1. Remove old distribution files.
 
     ```
-    rm -r dist/
-    rm -r build/
-    rm -r cortex_serving_client.egg-info/
+    rm -r dist/ build/ cortex_serving_client.egg-info/
     ```
     
 1. Generate distribution files.
