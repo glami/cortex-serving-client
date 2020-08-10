@@ -271,7 +271,7 @@ class CortexClient:
                     api_name = api_row.api_name
                     if self.get(api_name).status != "not_deployed":
                         logger.warning(f"Collecting Cortex garbage - timed-out deployed API: {api_name}")
-                        self.delete(api_name)
+                        self.delete(api_name, cursor=cur)
 
                     else:
                         logger.warning(f"Collecting Cortex garbage - timed-out db row: {api_name}")
@@ -302,10 +302,10 @@ class CortexClient:
                 recorded_apis_set = set([r.api_name for r in cur.fetchall()])
                 for deployed_not_recorded_name in set(deployed_api_names).difference(recorded_apis_set):
                     logger.warning(f"Collecting Cortex garbage - deployed not recorded: {deployed_not_recorded_name}")
-                    self.delete(deployed_not_recorded_name)
+                    self.delete(deployed_not_recorded_name, cursor=cur)
 
         except Exception as e:
-            logger.warning(f"Warning exception occurred during garbage collection.", exc_info=e)
+            logger.warning(f"Ignoring unexpected exception that occurred during Garbage Collection: {e}", exc_info=e)
 
     def _init_garbage_api_collector(self, interval_sec):
         with self._open_db_cursor() as cur:
