@@ -1,4 +1,9 @@
+import logging
 import unittest
+
+logging.basicConfig(
+    format="%(asctime)s : %(levelname)s : %(threadName)-10s : %(name)s : %(message)s", level=logging.INFO
+)
 
 from requests import post
 

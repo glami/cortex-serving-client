@@ -261,47 +261,51 @@ class CortexClient:
 
     def _collect_garbage(self):
         logger.info(f"Starting garbage collection.")
-        with self._open_db_cursor() as cur:
-            # remove timed out - deployed and recorded
-            cur.execute(
-                "select api_name from cortex_api_timeout where ultimate_timeout < transaction_timestamp() for update"
-            )
-            for api_row in cur.fetchall():
-                api_name = api_row.api_name
-                if self.get(api_name).status != "not_deployed":
-                    logger.warning(f"Collecting Cortex garbage - timed-out deployed API: {api_name}")
-                    self.delete(api_name)
-
-                else:
-                    logger.warning(f"Collecting Cortex garbage - timed-out db row: {api_name}")
-                    self._del_db_api_row(api_name, cur)
-
-            cur.execute("commit")
-
-            deployed_api_names = [row.api for row in self.get_all()]
-
-            # Remove recorded but not deployed - fast to avoid conflicts
-            cur.execute(
-                "select api_name from cortex_api_timeout where modified + %s * interval '1 second' < transaction_timestamp() and not (api_name = ANY(%s))",
-                [CORTEX_DEPLOY_REPORTED_TIMEOUT_SEC, deployed_api_names],
-            )
-            if cur.rowcount > 0:
-                apis = [r.api_name for r in cur.fetchall()]
-                logger.warning(f"Collecting Cortex garbage - recorded but not deployed: {apis}")
+        try:
+            with self._open_db_cursor() as cur:
+                # remove timed out - deployed and recorded
                 cur.execute(
-                    "delete from cortex_api_timeout where modified + %s * interval '1 second' < transaction_timestamp() and not (api_name = ANY(%s))",
-                    [CORTEX_DEPLOY_REPORTED_TIMEOUT_SEC, deployed_api_names],
+                    "select api_name from cortex_api_timeout where ultimate_timeout < transaction_timestamp() for update"
                 )
+                for api_row in cur.fetchall():
+                    api_name = api_row.api_name
+                    if self.get(api_name).status != "not_deployed":
+                        logger.warning(f"Collecting Cortex garbage - timed-out deployed API: {api_name}")
+                        self.delete(api_name)
+
+                    else:
+                        logger.warning(f"Collecting Cortex garbage - timed-out db row: {api_name}")
+                        self._del_db_api_row(api_name, cur)
+
                 cur.execute("commit")
 
-            # Remove deployed but not recorded
-            cur.execute(
-                "select api_name from cortex_api_timeout", [CORTEX_DEPLOY_REPORTED_TIMEOUT_SEC],
-            )
-            recorded_apis_set = set([r.api_name for r in cur.fetchall()])
-            for deployed_not_recorded_name in set(deployed_api_names).difference(recorded_apis_set):
-                logger.warning(f"Collecting Cortex garbage - deployed not recorded: {deployed_not_recorded_name}")
-                self.delete(deployed_not_recorded_name)
+                deployed_api_names = [row.api for row in self.get_all()]
+
+                # Remove recorded but not deployed - fast to avoid conflicts
+                cur.execute(
+                    "select api_name from cortex_api_timeout where modified + %s * interval '1 second' < transaction_timestamp() and not (api_name = ANY(%s))",
+                    [CORTEX_DEPLOY_REPORTED_TIMEOUT_SEC, deployed_api_names],
+                )
+                if cur.rowcount > 0:
+                    apis = [r.api_name for r in cur.fetchall()]
+                    logger.warning(f"Collecting Cortex garbage - recorded but not deployed: {apis}")
+                    cur.execute(
+                        "delete from cortex_api_timeout where modified + %s * interval '1 second' < transaction_timestamp() and not (api_name = ANY(%s))",
+                        [CORTEX_DEPLOY_REPORTED_TIMEOUT_SEC, deployed_api_names],
+                    )
+                    cur.execute("commit")
+
+                # Remove deployed but not recorded
+                cur.execute(
+                    "select api_name from cortex_api_timeout", [CORTEX_DEPLOY_REPORTED_TIMEOUT_SEC],
+                )
+                recorded_apis_set = set([r.api_name for r in cur.fetchall()])
+                for deployed_not_recorded_name in set(deployed_api_names).difference(recorded_apis_set):
+                    logger.warning(f"Collecting Cortex garbage - deployed not recorded: {deployed_not_recorded_name}")
+                    self.delete(deployed_not_recorded_name)
+
+        except Exception as e:
+            logger.warning(f"Warning exception occurred during garbage collection.", exc_info=e)
 
     def _init_garbage_api_collector(self, interval_sec):
         with self._open_db_cursor() as cur:
@@ -333,11 +337,7 @@ class CortexClient:
     def _start_gc_loop(self, interval_sec):
         while True:
             time.sleep(interval_sec)
-            try:
-                self._collect_garbage()
-
-            except Exception as e:
-                logger.warning(f"WarningException occurred during garbage collection.", exc_info=e)
+            self._collect_garbage()
 
 
 @contextmanager
