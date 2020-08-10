@@ -18,16 +18,7 @@ Warning: Below is an experimental version. Automation will be added later.
 1. Git-Tag the release and push the tag and the master branch.
    - TODO GPG signed Tag? https://github.com/scikit-build/ninja-python-distributions/blob/master/docs/make_a_release.rst
    
-1. Remove old distribution files.
-
-    ```
-    rm -r dist/ build/ cortex_serving_client.egg-info/
-    ```
-    
-1. Generate distribution files.
-
-    `python3 setup.py sdist bdist_wheel`
-    
-1. Upload using below username is `__token__` and password is your API token.
-
-    `python3 -m twine upload dist/*`
+1. Execute and use your API token as a password:
+   ```
+   bash ./publish_to_pypi.sh; 
+   ```
