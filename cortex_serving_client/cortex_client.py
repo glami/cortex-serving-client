@@ -23,7 +23,7 @@ On some places custom "not_deployed" status may be used.
 CORTEX_STATUSES = ["live", "updating", "error", "error (out of memory)", "compute unavailable"]  #
 CORTEX_DELETE_TIMEOUT_SEC = 10 * 60
 CORTEX_DEPLOY_REPORTED_TIMEOUT_SEC = 60
-CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT = 15 * 60
+CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT = 20 * 60
 CORTEX_DEFAULT_API_TIMEOUT = CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT
 INFINITE_TIMEOUT_SEC = 30 * 365 * 24 * 60 * 60  # 30 years
 
