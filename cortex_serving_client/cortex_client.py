@@ -7,14 +7,13 @@ import subprocess
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from threading import Thread
 from typing import NamedTuple, Optional, Dict, List, Callable
 
 import yaml
 from psycopg2._psycopg import DatabaseError
 from psycopg2.extras import NamedTupleCursor
 from psycopg2.pool import ThreadedConnectionPool
-
-from cortex_serving_client.log_thread import LogThread
 
 """
 Details: https://www.cortex.dev/deployments/statuses
@@ -237,7 +236,7 @@ class CortexClient:
         def listen_on_logs():
             os.system("cortex logs " + name + " " + f"--env={self.cortex_env}")
 
-        worker = LogThread(target=listen_on_logs, daemon=True)
+        worker = Thread(target=listen_on_logs, daemon=True)
         worker.start()
 
     @staticmethod
@@ -331,7 +330,7 @@ class CortexClient:
                 """
                 )
 
-        self.looping_thread = LogThread(target=lambda: self._start_gc_loop(interval_sec), daemon=True)
+        self.looping_thread = Thread(target=lambda: self._start_gc_loop(interval_sec), daemon=True)
         self.looping_thread.start()
 
     def _start_gc_loop(self, interval_sec):
