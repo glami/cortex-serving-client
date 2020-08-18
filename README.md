@@ -9,7 +9,7 @@ It is a Python wrapper around [Cortex's command-line client](https://cortex.dev)
 - Prevent accidental charges by auto-removing deployments that exceeded a timeout.
 - Implement automated rollback in case the new model fails.
 - Supported operations: deploy, delete, get, get all.
-- Supported Cortex Version: 0.17.
+- Supported Cortex Version: 0.18.
 
 ## How It Works?
 
@@ -87,7 +87,7 @@ grant all privileges on database cortext_test to cortex_test;
 ### Install Cortex
 Install supported [Cortex.dev](https://cortex.dev) version:
 ```bash
-bash -c "$(curl -sS https://raw.githubusercontent.com/cortexlabs/cortex/0.17/get-cli.sh)";
+bash -c "$(curl -sS https://raw.githubusercontent.com/cortexlabs/cortex/0.18/get-cli.sh)";
 ```
 
 This example runs in a simulated local cluster in local docker. To execute it in an AWS cluster, follow [this Cortex tutorial](https://docs.cortex.dev/install#running-at-scale-on-aws),
