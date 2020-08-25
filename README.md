@@ -17,7 +17,7 @@ you can deploy it to your Cortex cluster,
 and execute a prediction via a POST request.
 
 ### Working Example
-Below is a snippet from [examply.py](/example/example.py):
+Below is a snippet from [example.py](/example/example.py):
 ```python
 deployment = dict(
     name='dummy-api',
