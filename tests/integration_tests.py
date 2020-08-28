@@ -40,8 +40,11 @@ class IntegrationTests(unittest.TestCase):
                 print_logs=True,
         ) as get_result:
             result = post(get_result.endpoint, json={}).json()
+            # extra delete can occur, should not cause failure
+            self.cortex.delete(deployment['name'])
 
         self.assertTrue(result['yes'])
+        self.assertEqual(self.cortex.get(deployment['name']).status, 'not_deployed')
 
     def test_deploy_fail(self):
         deployment = dict(
@@ -66,6 +69,8 @@ class IntegrationTests(unittest.TestCase):
 
         except ValueError as e:
             self.assertIn('Deployment failed with status error', str(e))
+
+        self.assertEqual(self.cortex.get(deployment['name']).status, 'not_deployed')
 
 
 

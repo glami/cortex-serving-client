@@ -2,8 +2,8 @@ import subprocess
 import textwrap
 import unittest
 
-# from cortex_client import cortex_parse_get_all, CortexGetAllStatus, CortexClient
-from cortex_serving_client.cortex_client import cortex_parse_get_all, CortexGetAllStatus, CortexClient
+from cortex_serving_client.cortex_client import cortex_parse_get_all, CortexGetAllStatus, CortexClient, \
+    _verbose_command_wrapper
 
 
 class CortexClientTest(unittest.TestCase):
@@ -63,3 +63,6 @@ class CortexClientTest(unittest.TestCase):
 
         except subprocess.TimeoutExpired as e:
             print(f'{e} with stdout: "{e.output}" and stderr: "{e.stderr}"')
+
+    def test_not_deployed(self):
+        _verbose_command_wrapper(['cat', 'not_deployed'], allow_non_0_return_code_on_stdout_sub_strs=['not_deployed'])

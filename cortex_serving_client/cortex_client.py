@@ -223,7 +223,8 @@ class CortexClient:
                 return get_result
 
             else:
-                _verbose_command_wrapper(delete_arr, input=accept_deletion_if_asked_input)
+                _verbose_command_wrapper(delete_arr, input=accept_deletion_if_asked_input,
+                                         allow_non_0_return_code_on_stdout_sub_strs=['not deployed'])
 
             if start_time + timeout_sec < time.time():
                 raise ValueError(
@@ -354,20 +355,25 @@ def open_pg_cursor(db_connection_pool, key=None):
 
 def _verbose_command_wrapper(
         cmd_arr: List[str], cwd: str = None, timeout: int = CORTEX_DEFAULT_COMMAND_SYSTEM_PROCESS_TIMEOUT,
-        input: bytes = None, retry_count=3
+        input: bytes = None, retry_count=3, allow_non_0_return_code_on_stdout_sub_strs=None
 ):
     cmd_str = " ".join(cmd_arr)
     message = ""
     for retry in range(retry_count):
         try:
             p = subprocess.run(cmd_arr, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd, timeout=timeout, input=input)
-            out = p.stdout.decode()
+            stdout = p.stdout.decode()
+            stderr = p.stderr.decode()
             # check_returncode() does not print process output to the console automatically so custom below
             if p.returncode == 0:
-                logger.debug(f"Successful commmand {cmd_arr} stdout is {json.dumps(out)}")
-                return out
+                logger.debug(f"Successful commmand {cmd_arr} stdout is {json.dumps(stdout)}")
+                return stdout
 
-            message = f"Non zero return code for command {cmd_str}! Stdout:\n{json.dumps(out)}"
+            elif allow_non_0_return_code_on_stdout_sub_strs is not None and any([s in stdout or s in stderr for s in allow_non_0_return_code_on_stdout_sub_strs]):
+                logger.warning(f"Allowed unsuccessful command {cmd_arr} execution. Stdout {json.dumps(stdout)} or stderr {json.dump(stderr)} matches one of {allow_non_0_return_code_on_stdout_sub_strs}")
+                return stdout
+
+            message = f"Non zero return code for command {cmd_str}! Stdout:\n{json.dumps(stdout)}"
             if retry <= retry_count:
                 logger.warning(message)
 
