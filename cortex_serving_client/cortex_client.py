@@ -26,6 +26,7 @@ CORTEX_DEPLOY_REPORTED_TIMEOUT_SEC = 60
 CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT = 20 * 60
 CORTEX_DEFAULT_API_TIMEOUT = CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT
 INFINITE_TIMEOUT_SEC = 30 * 365 * 24 * 60 * 60  # 30 years
+CORTEX_DEFAULT_COMMAND_SYSTEM_PROCESS_TIMEOUT = 3 * 60
 
 
 logger = logging.getLogger(__name__)
@@ -352,25 +353,35 @@ def open_pg_cursor(db_connection_pool, key=None):
 
 
 def _verbose_command_wrapper(
-    cmd_arr: List[str], cwd: str = None, timeout: int = None, input: bytes = None, retry_count=3
+        cmd_arr: List[str], cwd: str = None, timeout: int = CORTEX_DEFAULT_COMMAND_SYSTEM_PROCESS_TIMEOUT,
+        input: bytes = None, retry_count=3
 ):
     cmd_str = " ".join(cmd_arr)
     message = ""
     for retry in range(retry_count):
-        p = subprocess.run(cmd_arr, stdout=subprocess.PIPE, cwd=cwd, timeout=timeout, input=input)
-        out = p.stdout.decode()
-        # check_returncode() does not print process output to the console automatically so custom below
-        if p.returncode == 0:
-            logger.debug(f"Successful commmand {cmd_arr} stdout is {json.dumps(out)}")
-            return out
+        try:
+            p = subprocess.run(cmd_arr, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd, timeout=timeout, input=input)
+            out = p.stdout.decode()
+            # check_returncode() does not print process output to the console automatically so custom below
+            if p.returncode == 0:
+                logger.debug(f"Successful commmand {cmd_arr} stdout is {json.dumps(out)}")
+                return out
 
-        message = f"Non zero return code for command {cmd_str}! Stdout:\n{json.dumps(out)}"
-        if retry <= retry_count:
-            logger.warning(message)
+            message = f"Non zero return code for command {cmd_str}! Stdout:\n{json.dumps(out)}"
+            if retry <= retry_count:
+                logger.warning(message)
+
+        except subprocess.TimeoutExpired as e:
+            timeout_message = f'{e} with stdout: "{e.output}" and stderr: "{e.stderr}"'
+            if retry <= retry_count:
+                logger.warning("Retry ignoring exception: " + timeout_message)
+
+            else:
+                raise ValueError("Retry count exceeded: " + timeout_message) from e
 
         time.sleep(3)
 
-    raise ValueError(message)
+    raise ValueError("Retry count exceeded: " + message)
 
 
 class CortexGetAllStatus(NamedTuple):

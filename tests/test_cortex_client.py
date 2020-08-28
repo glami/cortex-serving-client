@@ -1,3 +1,4 @@
+import subprocess
 import textwrap
 import unittest
 
@@ -54,3 +55,11 @@ class CortexClientTest(unittest.TestCase):
         resutl = CortexClient._parse_get_deployed(out)
         self.assertEqual(resutl.status, "live")
         self.assertEqual(resutl.endpoint, "http://xxxxysdyfasdf.elb.us-east-1.amazonaws.com/xxxljsdf")
+
+    def test_subprocess_timeout(self):
+        try:
+            p = subprocess.run(['grep', 'test'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=1)
+            print(p)
+
+        except subprocess.TimeoutExpired as e:
+            print(f'{e} with stdout: "{e.output}" and stderr: "{e.stderr}"')
