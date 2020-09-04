@@ -370,7 +370,7 @@ def _verbose_command_wrapper(
                 return stdout
 
             elif allow_non_0_return_code_on_stdout_sub_strs is not None and any([s in stdout or s in stderr for s in allow_non_0_return_code_on_stdout_sub_strs]):
-                logger.warning(f"Allowed unsuccessful command {cmd_arr} execution. Stdout {json.dumps(stdout)} or stderr {json.dump(stderr)} matches one of {allow_non_0_return_code_on_stdout_sub_strs}")
+                logger.warning(f"Allowed unsuccessful command {cmd_arr} execution. Stdout {json.dumps(stdout)} or stderr {json.dumps(stderr)} matches one of {allow_non_0_return_code_on_stdout_sub_strs}")
                 return stdout
 
             message = f"Non zero return code for command {cmd_str}! Stdout:\n{json.dumps(stdout)}"
