@@ -38,7 +38,7 @@ class CortexClient:
     An object used to execute commands on Cortex, maintain API state in the db to collect garbage.
     """
 
-    def __init__(self, db_connection_pool: ThreadedConnectionPool, gc_interval_sec=15 * 60, cortex_env="aws"):
+    def __init__(self, db_connection_pool: ThreadedConnectionPool, gc_interval_sec=30 * 60, cortex_env="aws"):
         self.db_connection_pool = db_connection_pool
         self._init_garbage_api_collector(gc_interval_sec)
         self.cortex_env = cortex_env
@@ -375,12 +375,12 @@ def _verbose_command_wrapper(
 
             message = f"Non zero return code for command {cmd_str}! Stdout:\n{json.dumps(stdout)}"
             if retry <= retry_count:
-                logger.warning(message)
+                logger.info(message)
 
         except subprocess.TimeoutExpired as e:
             timeout_message = f'{e} with stdout: "{e.output}" and stderr: "{e.stderr}"'
             if retry <= retry_count:
-                logger.warning("Retry ignoring exception: " + timeout_message)
+                logger.info("Retry ignoring exception: " + timeout_message)
 
             else:
                 raise ValueError("Retry count exceeded: " + timeout_message) from e
