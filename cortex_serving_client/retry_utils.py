@@ -24,7 +24,7 @@ def retry_on_exception(
 
                 ex = e
                 sleep_secs = starting_sleep_secs * 2 ** retry
-                fun_logger.warning(f"Retrying {retry+1} time with sleep {sleep_secs} secs.")
+                fun_logger.info(f"Retrying {retry+1} time with sleep {sleep_secs} secs.")
                 sleep(sleep_secs)
 
-    raise RuntimeError(f"Too many retries ({max_retries}).") from ex
+    raise RuntimeError(f"Too many retries ({max_retries}). Last exception: {ex}.") from ex
