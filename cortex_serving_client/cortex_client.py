@@ -79,13 +79,17 @@ class CortexClient:
         name = deployment["name"]
         predictor_yaml_str = yaml.dump([deployment], default_flow_style=False)
 
+        if api_timeout_sec < deployment_timeout_sec:
+            logger.warning(f'API timeout for {name} of {api_timeout_sec} is shorter than deployment timeout of {deployment_timeout_sec}. This may cause unintended garbage collection! Setting API timeout to deployment timeout.')
+            api_timeout_sec = deployment_timeout_sec
+
         # file has to be created the dir to which python predictors are described in yaml
         filename = f"{name}.yaml"
         filepath = f"{dir}/{filename}"
         with str_to_public_temp_file(predictor_yaml_str, filepath):
             self._collect_garbage()
-            ultimate_timeout_sec = api_timeout_sec + CORTEX_DELETE_TIMEOUT_SEC
-            logger.info(f"Ultimate timeout for deployment {name} is {ultimate_timeout_sec} seconds.")
+            gc_timeout_sec = api_timeout_sec + CORTEX_DELETE_TIMEOUT_SEC
+            logger.info(f"Deployment {name} has deployment timeout: {deployment_timeout_sec} sec, garbage collection timeout: {gc_timeout_sec} seconds.")
             with self._open_db_cursor() as cursor:
                 cursor.execute(
                     """
@@ -93,7 +97,7 @@ class CortexClient:
                     on conflict (api_name) do update
                         set ultimate_timeout = transaction_timestamp() + %s * interval '1 second', modified = transaction_timestamp()
                 """,
-                    [name, ultimate_timeout_sec, ultimate_timeout_sec],
+                    [name, gc_timeout_sec, gc_timeout_sec],
                 )
 
             _verbose_command_wrapper(["cortex", "deploy", filename, f"--env={self.cortex_env}"], cwd=dir)
@@ -107,7 +111,7 @@ class CortexClient:
             if get_result.status not in ("live", "updating"):
                 # avoids boot loop
                 self.delete(name)
-                raise ValueError(f"Deployment failed with status {get_result.status}.")
+                raise ValueError(f"Deployment {name} failed with status {get_result.status}.")
 
             elif get_result.status == "live":
                 break
@@ -115,9 +119,9 @@ class CortexClient:
             if start_time + deployment_timeout_sec < time.time():
                 # avoids boot loop
                 self.delete(name)
-                raise ValueError(f"Deployment timeout after {deployment_timeout_sec} seconds.")
+                raise ValueError(f"Deployment {name} timeout after {deployment_timeout_sec} seconds.")
 
-            logger.info(f"Sleeping until next retry. Current get_result: {get_result}.")
+            logger.info(f"Sleeping during deployment of {name} until next retry. Current get_result: {get_result}.")
             time.sleep(10)
 
         return get_result
@@ -188,7 +192,7 @@ class CortexClient:
             return CortexGetResult("not_deployed", None)
 
         else:
-            raise ValueError(f"Unsupported Cortex output:\n{out}")
+            raise ValueError(f"For api: {name} got unsupported Cortex output:\n{out}")
 
     @staticmethod
     def _parse_get_deployed(cmd_out: str):
@@ -231,7 +235,7 @@ class CortexClient:
                     f"Timeout after {timeout_sec} seconds. Attempted force delete, but not waiting for results."
                 )
 
-            logger.info(f"Sleeping until next retry. Current get_result: {get_result}.")
+            logger.info(f"During delete of {name} sleeping until next retry. Current get_result: {get_result}.")
             time.sleep(10)
 
     def _cortex_logs_print_async(self, name):
@@ -247,7 +251,7 @@ class CortexClient:
             cur.execute("delete from cortex_api_timeout where api_name = %s", [name])
 
         except DatabaseError:
-            logger.warning(f"Ignoring exception during cortex_api_timeout record deletion", exc_info=True)
+            logger.warning(f"Ignoring exception during cortex_api_timeout record for {name} deletion", exc_info=True)
 
     def _open_db_cursor(self):
         return open_pg_cursor(self.db_connection_pool)
@@ -366,7 +370,7 @@ def _verbose_command_wrapper(
             stderr = p.stderr.decode()
             # check_returncode() does not print process output to the console automatically so custom below
             if p.returncode == 0:
-                logger.debug(f"Successful commmand {cmd_arr} stdout is {json.dumps(stdout)}")
+                logger.debug(f"Successful command {cmd_arr} stdout is {json.dumps(stdout)}")
                 return stdout
 
             elif allow_non_0_return_code_on_stdout_sub_strs is not None and any([s in stdout or s in stderr for s in allow_non_0_return_code_on_stdout_sub_strs]):
@@ -380,14 +384,14 @@ def _verbose_command_wrapper(
         except subprocess.TimeoutExpired as e:
             timeout_message = f'{e} with stdout: "{e.output}" and stderr: "{e.stderr}"'
             if retry <= retry_count:
-                logger.info("Retry ignoring exception: " + timeout_message)
+                logger.info(f"Retrying command {cmd_str} ignoring exception: " + timeout_message)
 
             else:
-                raise ValueError("Retry count exceeded: " + timeout_message) from e
+                raise ValueError(f"Retry count for command {cmd_str} exceeded: " + timeout_message) from e
 
         time.sleep(3)
 
-    raise ValueError("Retry count exceeded: " + message)
+    raise ValueError(f"Retry count for command {cmd_str} exceeded: " + message)
 
 
 class CortexGetAllStatus(NamedTuple):

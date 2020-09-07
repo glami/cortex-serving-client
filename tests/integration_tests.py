@@ -68,7 +68,7 @@ class IntegrationTests(unittest.TestCase):
                 self.fail(f'Deployment should fail but {get_result.status}.')
 
         except ValueError as e:
-            self.assertIn('Deployment failed with status error', str(e))
+            self.assertIn('failed with status error', str(e))
 
         self.assertEqual(self.cortex.get(deployment['name']).status, 'not_deployed')
 
