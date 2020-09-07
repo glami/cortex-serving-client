@@ -79,6 +79,14 @@ class CortexClient:
         name = deployment["name"]
         predictor_yaml_str = yaml.dump([deployment], default_flow_style=False)
 
+        if api_timeout_sec < CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT:
+            logger.info(f'API timeout {api_timeout_sec} is be smaller than default deployment timeout {CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT}. Setting it to {CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT}.')
+            api_timeout_sec = CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT
+
+        if deployment_timeout_sec < CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT:
+            logger.info(f'Deployment timeout {api_timeout_sec} is be smaller than default deployment timeout {CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT}. Setting it to {CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT}.')
+            deployment_timeout_sec = CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT
+
         if api_timeout_sec < deployment_timeout_sec:
             logger.warning(f'API timeout for {name} of {api_timeout_sec} is shorter than deployment timeout of {deployment_timeout_sec}. This may cause unintended garbage collection! Setting API timeout to deployment timeout.')
             api_timeout_sec = deployment_timeout_sec
