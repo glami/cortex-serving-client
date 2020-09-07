@@ -8,7 +8,7 @@ It is a Python wrapper around [Cortex's command-line client](https://cortex.dev)
 - Automate your Cortex cluster from Python.
 - Prevent accidental charges by auto-removing deployments that exceeded a timeout.
 - Supported operations: deploy, delete, get, get all.
-- Supported Cortex Version: 0.18.
+- Supported Cortex Version: 0.18.4
 
 ## How It Works?
 
