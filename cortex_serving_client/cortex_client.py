@@ -1,4 +1,5 @@
 import contextlib
+import io
 import json
 import logging
 import os
@@ -29,7 +30,7 @@ INFINITE_TIMEOUT_SEC = 30 * 365 * 24 * 60 * 60  # 30 years
 CORTEX_DEFAULT_COMMAND_SYSTEM_PROCESS_TIMEOUT = 3 * 60
 
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger('cortex_client')
 __cortex_client_instance = None
 
 
@@ -248,9 +249,12 @@ class CortexClient:
 
     def _cortex_logs_print_async(self, name):
         def listen_on_logs():
-            os.system("cortex logs " + name + " " + f"--env={self.cortex_env}")
+            with subprocess.Popen(["cortex", "logs", name, f"--env={self.cortex_env}"], stdout=subprocess.PIPE) as logs_sp:
+                with io.TextIOWrapper(logs_sp.stdout, encoding="utf-8") as logs_out:
+                    for line in logs_out:
+                        logger.info(line.rstrip('\n'))
 
-        worker = Thread(target=listen_on_logs, daemon=True)
+        worker = Thread(target=listen_on_logs, daemon=True, name=name)
         worker.start()
 
     @staticmethod
@@ -318,7 +322,7 @@ class CortexClient:
                     self.delete(deployed_not_recorded_name, cursor=cur)
 
         except Exception as e:
-            logger.warning(f"Ignoring unexpected exception that occurred during Garbage Collection: {e}", exc_info=e)
+            logger.info(f"Ignoring unexpected exception that occurred during Garbage Collection: {e}", exc_info=e)
 
     def _init_garbage_api_collector(self, interval_sec):
         with self._open_db_cursor() as cur:
