@@ -8,7 +8,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="cortex-serving-client",
-    version="0.18.6",
+    version="0.18.7",
     author="Vaclav Kosar, Antonin Hoskovec, Radek Bartyzal",
     author_email="vaclav.kosar@glami.cz, antonin.hoskovec@glami.cz, radek.bartyzal@glami.cz",
     description="Cortex.dev ML Serving Client for Python with garbage API collection.",
