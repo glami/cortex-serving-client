@@ -252,9 +252,11 @@ class CortexClient:
             with subprocess.Popen(["cortex", "logs", name, f"--env={self.cortex_env}"], stdout=subprocess.PIPE) as logs_sp:
                 with io.TextIOWrapper(logs_sp.stdout, encoding="utf-8") as logs_out:
                     for line in logs_out:
-                        logger.info(line.rstrip('\n'))
+                        print_line = line.rstrip('\n')
+                        if len(print_line) > 0:
+                            logger.info(print_line)
 
-        worker = Thread(target=listen_on_logs, daemon=True, name=name)
+        worker = Thread(target=listen_on_logs, daemon=True, name=f'api_{name}')
         worker.start()
 
     @staticmethod
