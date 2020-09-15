@@ -16,6 +16,8 @@ from psycopg2._psycopg import DatabaseError
 from psycopg2.extras import NamedTupleCursor
 from psycopg2.pool import ThreadedConnectionPool
 
+from cortex_serving_client.printable_chars import remove_non_printable
+
 """
 Details: https://www.cortex.dev/deployments/statuses
 On some places custom "not_deployed" status may be used.
@@ -252,7 +254,7 @@ class CortexClient:
             with subprocess.Popen(["cortex", "logs", name, f"--env={self.cortex_env}"], stdout=subprocess.PIPE) as logs_sp:
                 with io.TextIOWrapper(logs_sp.stdout, encoding="utf-8") as logs_out:
                     for line in logs_out:
-                        print_line = line.rstrip('\n')
+                        print_line = remove_non_printable(line.rstrip('\n'))
                         if len(print_line) > 0:
                             logger.info(print_line)
 
