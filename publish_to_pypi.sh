@@ -11,7 +11,7 @@ fi;
 
 tag="$1"
 echo "Check tag in setup.py"
-if !grep -q "${tag}" setup.py; then
+if ! grep -q "${tag}" setup.py; then
   echo "Tag is not configured in the setup.py";
   exit 1;
 fi;
