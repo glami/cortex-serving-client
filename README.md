@@ -5,7 +5,7 @@
 Cortex Serving Client makes Python serving automation simple.
 It is a Python wrapper around [Cortex's command-line client](https://cortex.dev) that provides garbage API collection.
 
-- Automate your Cortex cluster from Python.
+- Automate your Cortex AWS cluster from Python.
 - Prevent accidental charges by auto-removing deployments that exceeded a timeout.
 - Execute operations: deploy, delete, get, get all.
 - Stream remote logs into the local log with thread name set to the API name.
