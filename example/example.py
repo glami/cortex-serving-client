@@ -1,10 +1,23 @@
-from requests import post
+# Basic logging config
+import logging
+logging.basicConfig(
+    format="%(asctime)s : %(levelname)s : %(threadName)-10s : %(name)s : %(message)s", level=logging.INFO,
+)
 
+from requests import post
 from cortex_serving_client.cortex_client import get_cortex_client_instance
 
 
-cortex = get_cortex_client_instance(pg_user='cortex_test', pg_password='cortex_test', pg_db='cortex_test', cortex_env='local')
+# Instantiate Cortex Client
+cortex = get_cortex_client_instance(
+    cortex_env='local',
+    pg_user='cortex_test',
+    pg_password='cortex_test',
+    pg_db='cortex_test',
+    )
 
+
+# Deployment config
 deployment = dict(
     name='dummy-api',
     predictor=dict(
@@ -12,17 +25,20 @@ deployment = dict(
         path='dummy_predictor.py',
     ),
     compute=dict(
-        cpu=1,
+        cpu='290m',
     )
 )
 
+# Deploy
 with cortex.deploy_temporarily(
         deployment,
         dir="dummy_dir",
         api_timeout_sec=10 * 60,
         print_logs=True,
 ) as get_result:
-    result = post(get_result.endpoint, json={}).json()
+    # Predict
+    result = post(get_result.endpoint, json={"question": "Do you love ML?"}).json()
 
+# Check the response
 assert result['yes']
 print(result)
