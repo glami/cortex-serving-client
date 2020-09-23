@@ -33,7 +33,7 @@ deployment = dict(
 with cortex.deploy_temporarily(
         deployment,
         dir="dummy_dir",
-        api_timeout_sec=10 * 60,
+        api_timeout_sec=30 * 60,
         print_logs=True,
 ) as get_result:
     # Predict
