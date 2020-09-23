@@ -1,7 +1,8 @@
 class PythonPredictor:
     def __init__(self, config):
-        print('Inited!')
+        print('Initialized the model!')
 
     def predict(self, payload):
-        print('Predicting')
+        print('Predicting!')
         return dict(yes=True, **payload)
+
