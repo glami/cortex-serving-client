@@ -1,6 +1,8 @@
 import logging
 import unittest
 
+from cortex_serving_client.deployment_failed import DeploymentFailed
+
 logging.basicConfig(
     format="%(asctime)s : %(levelname)s : %(threadName)-10s : %(name)s : %(message)s", level=logging.INFO
 )
@@ -67,7 +69,7 @@ class IntegrationTests(unittest.TestCase):
             ) as get_result:
                 self.fail(f'Deployment should fail but {get_result.status}.')
 
-        except ValueError as e:
+        except DeploymentFailed as e:
             self.assertIn('failed with status error', str(e))
 
         self.assertEqual(self.cortex.get(deployment['name']).status, 'not_deployed')

@@ -8,6 +8,7 @@ import subprocess
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from math import floor
 from threading import Thread
 from typing import NamedTuple, Optional, Dict, List, Callable
 
@@ -16,14 +17,21 @@ from psycopg2._psycopg import DatabaseError
 from psycopg2.extras import NamedTupleCursor
 from psycopg2.pool import ThreadedConnectionPool
 
+from cortex_serving_client.deployment_failed import DeploymentFailed, COMPUTE_UNAVAILABLE_FAIL_TYPE, \
+    DEPLOYMENT_TIMEOUT_FAIL_TYPE, DEPLOYMENT_ERROR_FAIL_TYPE
 from cortex_serving_client.printable_chars import remove_non_printable
+
 
 """
 Details: https://www.cortex.dev/deployments/statuses
 On some places custom "not_deployed" status may be used.
 """
 
-CORTEX_STATUSES = ["live", "updating", "error", "error (out of memory)", "compute unavailable"]  #
+LIVE_STATUS = "live"
+UPDATING_STATUS = "updating"
+COMPUTE_UNAVAILABLE_STATUS = "compute unavailable"
+CORTEX_STATUSES = [LIVE_STATUS, UPDATING_STATUS, "error", "error (out of memory)", COMPUTE_UNAVAILABLE_STATUS]  #
+
 CORTEX_DELETE_TIMEOUT_SEC = 10 * 60
 CORTEX_DEPLOY_REPORTED_TIMEOUT_SEC = 60
 CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT = 20 * 60
@@ -119,18 +127,25 @@ class CortexClient:
         start_time = time.time()
         while True:
             get_result = self.get(name)
-            if get_result.status not in ("live", "updating"):
-                # avoids boot loop
-                self.delete(name)
-                raise ValueError(f"Deployment {name} failed with status {get_result.status}.")
-
-            elif get_result.status == "live":
+            time_since_start = floor(time.time() - start_time)
+            if get_result.status == LIVE_STATUS:
                 break
 
-            if start_time + deployment_timeout_sec < time.time():
-                # avoids boot loop
+            elif get_result.status == COMPUTE_UNAVAILABLE_STATUS:
                 self.delete(name)
-                raise ValueError(f"Deployment {name} timeout after {deployment_timeout_sec} seconds.")
+                raise DeploymentFailed(
+                    f'Deployment of {name} API could not start due to insufficient memory, CPU, GPU or Inf in the cluster after {time_since_start} secs.',
+                    COMPUTE_UNAVAILABLE_FAIL_TYPE, name, time_since_start)
+
+            elif get_result.status != UPDATING_STATUS:
+                self.delete(name)
+                raise DeploymentFailed(f"Deployment of {name} failed with status {get_result.status} after {time_since_start} secs.",
+                                       DEPLOYMENT_ERROR_FAIL_TYPE, name, time_since_start)
+
+            if time_since_start > deployment_timeout_sec:
+                self.delete(name)
+                raise DeploymentFailed(f"Deployment of {name} timed out after {deployment_timeout_sec} secs.",
+                                       DEPLOYMENT_TIMEOUT_FAIL_TYPE, name, time_since_start)
 
             logger.info(f"Sleeping during deployment of {name} until next retry. Current get_result: {get_result}.")
             time.sleep(10)
@@ -209,7 +224,7 @@ class CortexClient:
     def _parse_get_deployed(cmd_out: str):
         lines = cmd_out.splitlines()
         status = lines[2].split("  ")[0].strip()
-        if status == "live":
+        if status == LIVE_STATUS:
             for line in lines:
                 line_split = line.split(" ")
                 if line_split[0] == "endpoint:":
@@ -393,9 +408,10 @@ def _verbose_command_wrapper(
                 logger.warning(f"Allowed unsuccessful command {cmd_arr} execution. Stdout {json.dumps(stdout)} or stderr {json.dumps(stderr)} matches one of {allow_non_0_return_code_on_stdout_sub_strs}")
                 return stdout
 
-            message = f"Non zero return code for command {cmd_str}! Stdout:\n{json.dumps(stdout)}"
-            if retry <= retry_count:
-                logger.info(message)
+            else:
+                message = f"Non zero return code for command {cmd_str}! Stdout:\n{json.dumps(stdout)}"
+                if retry <= retry_count:
+                    logger.info(message)
 
         except subprocess.TimeoutExpired as e:
             timeout_message = f'{e} with stdout: "{e.output}" and stderr: "{e.stderr}"'
