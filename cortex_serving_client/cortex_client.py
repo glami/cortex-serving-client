@@ -8,7 +8,7 @@ import subprocess
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from math import floor
+from math import ceil
 from threading import Thread
 from typing import NamedTuple, Optional, Dict, List, Callable
 
@@ -36,6 +36,7 @@ CORTEX_DELETE_TIMEOUT_SEC = 10 * 60
 CORTEX_DEPLOY_REPORTED_TIMEOUT_SEC = 60
 CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT = 20 * 60
 CORTEX_DEFAULT_API_TIMEOUT = CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT
+CORTEX_DEPLOY_RETRY_BASE_SLEEP_SEC = 5 * 60
 INFINITE_TIMEOUT_SEC = 30 * 365 * 24 * 60 * 60  # 30 years
 CORTEX_DEFAULT_COMMAND_SYSTEM_PROCESS_TIMEOUT = 3 * 60
 
@@ -61,6 +62,7 @@ class CortexClient:
         deployment_timeout_sec=CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT,
         api_timeout_sec=CORTEX_DEFAULT_API_TIMEOUT,
         print_logs=False,
+        n_retries=0
     ) -> 'CortexGetResult':
         """
         Deploy an API until timeouts. Cortex docs https://docs.cortex.dev/deployments/deployment.
@@ -79,6 +81,8 @@ class CortexClient:
             Time until API will be auto-deleted. Use `INFINITE_TIMEOUT_SEC` for infinite.
         print_logs
             Subscribe to Cortex logs of the API and print them to stdout.
+        n_retries
+            Number of attempts to deploy until raising the failure. Retries only if the failure is not an application error.
 
         Returns
         -------
@@ -105,52 +109,64 @@ class CortexClient:
         # file has to be created the dir to which python predictors are described in yaml
         filename = f"{name}.yaml"
         filepath = f"{dir}/{filename}"
-        with str_to_public_temp_file(predictor_yaml_str, filepath):
-            self._collect_garbage()
-            gc_timeout_sec = api_timeout_sec + CORTEX_DELETE_TIMEOUT_SEC
-            logger.info(f"Deployment {name} has deployment timeout: {deployment_timeout_sec} sec, garbage collection timeout: {gc_timeout_sec} seconds.")
-            with self._open_db_cursor() as cursor:
-                cursor.execute(
-                    """
-                    insert into cortex_api_timeout(api_name, ultimate_timeout) values (%s, transaction_timestamp() + %s * interval '1 second')
-                    on conflict (api_name) do update
-                        set ultimate_timeout = transaction_timestamp() + %s * interval '1 second', modified = transaction_timestamp()
-                """,
-                    [name, gc_timeout_sec, gc_timeout_sec],
-                )
 
-            _verbose_command_wrapper(["cortex", "deploy", filename, f"--env={self.cortex_env}"], cwd=dir)
+        for retry in range(n_retries + 1):
+            try:
+                self._collect_garbage()
+                with str_to_public_temp_file(predictor_yaml_str, filepath):
+                    gc_timeout_sec = api_timeout_sec + CORTEX_DELETE_TIMEOUT_SEC
+                    logger.info(f"Deployment {name} has deployment timeout: {deployment_timeout_sec} sec, garbage collection timeout: {gc_timeout_sec} seconds.")
+                    with self._open_db_cursor() as cursor:
+                        cursor.execute(
+                            """
+                            insert into cortex_api_timeout(api_name, ultimate_timeout) values (%s, transaction_timestamp() + %s * interval '1 second')
+                            on conflict (api_name) do update
+                                set ultimate_timeout = transaction_timestamp() + %s * interval '1 second', modified = transaction_timestamp()
+                        """,
+                            [name, gc_timeout_sec, gc_timeout_sec],
+                        )
 
-        if print_logs:
-            self._cortex_logs_print_async(name)
+                    _verbose_command_wrapper(["cortex", "deploy", filename, f"--env={self.cortex_env}"], cwd=dir)
 
-        start_time = time.time()
-        while True:
-            get_result = self.get(name)
-            time_since_start = floor(time.time() - start_time)
-            if get_result.status == LIVE_STATUS:
-                break
+                if print_logs:
+                    self._cortex_logs_print_async(name)
 
-            elif get_result.status == COMPUTE_UNAVAILABLE_STATUS:
-                self.delete(name)
-                raise DeploymentFailed(
-                    f'Deployment of {name} API could not start due to insufficient memory, CPU, GPU or Inf in the cluster after {time_since_start} secs.',
-                    COMPUTE_UNAVAILABLE_FAIL_TYPE, name, time_since_start)
+                start_time = time.time()
+                while True:
+                    get_result = self.get(name)
+                    time_since_start = ceil(time.time() - start_time)
+                    if get_result.status == LIVE_STATUS:
+                        return get_result
 
-            elif get_result.status != UPDATING_STATUS:
-                self.delete(name)
-                raise DeploymentFailed(f"Deployment of {name} failed with status {get_result.status} after {time_since_start} secs.",
-                                       DEPLOYMENT_ERROR_FAIL_TYPE, name, time_since_start)
+                    elif get_result.status == COMPUTE_UNAVAILABLE_STATUS:
+                        self.delete(name)
+                        raise DeploymentFailed(
+                            f'Deployment of {name} API could not start due to insufficient memory, CPU, GPU or Inf in the cluster after {time_since_start} secs.',
+                            COMPUTE_UNAVAILABLE_FAIL_TYPE, name, time_since_start)
 
-            if time_since_start > deployment_timeout_sec:
-                self.delete(name)
-                raise DeploymentFailed(f"Deployment of {name} timed out after {deployment_timeout_sec} secs.",
-                                       DEPLOYMENT_TIMEOUT_FAIL_TYPE, name, time_since_start)
+                    elif get_result.status != UPDATING_STATUS:
+                        self.delete(name)
+                        raise DeploymentFailed(f"Deployment of {name} failed with status {get_result.status} after {time_since_start} secs.",
+                                               DEPLOYMENT_ERROR_FAIL_TYPE, name, time_since_start)
 
-            logger.info(f"Sleeping during deployment of {name} until next retry. Current get_result: {get_result}.")
-            time.sleep(10)
+                    if time_since_start > deployment_timeout_sec:
+                        self.delete(name)
+                        raise DeploymentFailed(f"Deployment of {name} timed out after {deployment_timeout_sec} secs.",
+                                               DEPLOYMENT_TIMEOUT_FAIL_TYPE, name, time_since_start)
 
-        return get_result
+                    logger.info(f"Sleeping during deployment of {name} until next retry. Current get_result: {get_result}.")
+                    time.sleep(10)
+
+            except DeploymentFailed as e:
+                if retry == n_retries or e.failure_type == DEPLOYMENT_ERROR_FAIL_TYPE:
+                    raise e
+
+                else:
+                    sleep_secs = ceil(CORTEX_DEPLOY_RETRY_BASE_SLEEP_SEC * 2 ** retry)
+                    logger.warning(f'Retrying {retry + 1} time after sleep of {sleep_secs} secs due to deployment failure: {e}')
+
+        raise RuntimeError('Execution should never reach here.')
+
 
     @contextmanager
     def deploy_temporarily(
@@ -160,6 +176,7 @@ class CortexClient:
         deployment_timeout_sec=CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT,
         api_timeout_sec=CORTEX_DEFAULT_API_TIMEOUT,
         print_logs=False,
+        n_retries=0
     ) -> 'CortexGetResult':
         """
         Deploy an API until timeouts. Cortex docs https://docs.cortex.dev/deployments/deployment.
@@ -178,6 +195,8 @@ class CortexClient:
             Time until API will be auto-deleted. Use `INFINITE_TIMEOUT_SEC` for infinite.
         print_logs
             Subscribe to Cortex logs of the API and print them to stdout.
+        n_retries
+            Number of attempts to deploy until raising the failure. Retries only if the failure is not an application error.
 
         Returns
         -------
@@ -187,7 +206,7 @@ class CortexClient:
         """
 
         try:
-            yield self.deploy_single(deployment, dir, deployment_timeout_sec, api_timeout_sec, print_logs)
+            yield self.deploy_single(deployment, dir, deployment_timeout_sec, api_timeout_sec, print_logs, n_retries)
 
         finally:
             self.delete(deployment["name"])
