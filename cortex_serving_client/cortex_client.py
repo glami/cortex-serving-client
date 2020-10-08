@@ -8,6 +8,7 @@ import subprocess
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from math import ceil
 from threading import Thread
 from typing import NamedTuple, Optional, Dict, List, Callable
 
@@ -16,18 +17,26 @@ from psycopg2._psycopg import DatabaseError
 from psycopg2.extras import NamedTupleCursor
 from psycopg2.pool import ThreadedConnectionPool
 
+from cortex_serving_client.deployment_failed import DeploymentFailed, COMPUTE_UNAVAILABLE_FAIL_TYPE, \
+    DEPLOYMENT_TIMEOUT_FAIL_TYPE, DEPLOYMENT_ERROR_FAIL_TYPE
 from cortex_serving_client.printable_chars import remove_non_printable
+
 
 """
 Details: https://www.cortex.dev/deployments/statuses
 On some places custom "not_deployed" status may be used.
 """
 
-CORTEX_STATUSES = ["live", "updating", "error", "error (out of memory)", "compute unavailable"]  #
+LIVE_STATUS = "live"
+UPDATING_STATUS = "updating"
+COMPUTE_UNAVAILABLE_STATUS = "compute unavailable"
+CORTEX_STATUSES = [LIVE_STATUS, UPDATING_STATUS, "error", "error (out of memory)", COMPUTE_UNAVAILABLE_STATUS]  #
+
 CORTEX_DELETE_TIMEOUT_SEC = 10 * 60
 CORTEX_DEPLOY_REPORTED_TIMEOUT_SEC = 60
 CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT = 20 * 60
 CORTEX_DEFAULT_API_TIMEOUT = CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT
+CORTEX_DEPLOY_RETRY_BASE_SLEEP_SEC = 5 * 60
 INFINITE_TIMEOUT_SEC = 30 * 365 * 24 * 60 * 60  # 30 years
 CORTEX_DEFAULT_COMMAND_SYSTEM_PROCESS_TIMEOUT = 3 * 60
 
@@ -53,6 +62,7 @@ class CortexClient:
         deployment_timeout_sec=CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT,
         api_timeout_sec=CORTEX_DEFAULT_API_TIMEOUT,
         print_logs=False,
+        n_retries=0
     ) -> 'CortexGetResult':
         """
         Deploy an API until timeouts. Cortex docs https://docs.cortex.dev/deployments/deployment.
@@ -71,6 +81,8 @@ class CortexClient:
             Time until API will be auto-deleted. Use `INFINITE_TIMEOUT_SEC` for infinite.
         print_logs
             Subscribe to Cortex logs of the API and print them to stdout.
+        n_retries
+            Number of attempts to deploy until raising the failure. Retries only if the failure is not an application error.
 
         Returns
         -------
@@ -97,45 +109,64 @@ class CortexClient:
         # file has to be created the dir to which python predictors are described in yaml
         filename = f"{name}.yaml"
         filepath = f"{dir}/{filename}"
-        with str_to_public_temp_file(predictor_yaml_str, filepath):
-            self._collect_garbage()
-            gc_timeout_sec = api_timeout_sec + CORTEX_DELETE_TIMEOUT_SEC
-            logger.info(f"Deployment {name} has deployment timeout: {deployment_timeout_sec} sec, garbage collection timeout: {gc_timeout_sec} seconds.")
-            with self._open_db_cursor() as cursor:
-                cursor.execute(
-                    """
-                    insert into cortex_api_timeout(api_name, ultimate_timeout) values (%s, transaction_timestamp() + %s * interval '1 second')
-                    on conflict (api_name) do update
-                        set ultimate_timeout = transaction_timestamp() + %s * interval '1 second', modified = transaction_timestamp()
-                """,
-                    [name, gc_timeout_sec, gc_timeout_sec],
-                )
 
-            _verbose_command_wrapper(["cortex", "deploy", filename, f"--env={self.cortex_env}"], cwd=dir)
+        for retry in range(n_retries + 1):
+            try:
+                self._collect_garbage()
+                with str_to_public_temp_file(predictor_yaml_str, filepath):
+                    gc_timeout_sec = api_timeout_sec + CORTEX_DELETE_TIMEOUT_SEC
+                    logger.info(f"Deployment {name} has deployment timeout: {deployment_timeout_sec} sec, garbage collection timeout: {gc_timeout_sec} seconds.")
+                    with self._open_db_cursor() as cursor:
+                        cursor.execute(
+                            """
+                            insert into cortex_api_timeout(api_name, ultimate_timeout) values (%s, transaction_timestamp() + %s * interval '1 second')
+                            on conflict (api_name) do update
+                                set ultimate_timeout = transaction_timestamp() + %s * interval '1 second', modified = transaction_timestamp()
+                        """,
+                            [name, gc_timeout_sec, gc_timeout_sec],
+                        )
 
-        if print_logs:
-            self._cortex_logs_print_async(name)
+                    _verbose_command_wrapper(["cortex", "deploy", filename, f"--env={self.cortex_env}"], cwd=dir)
 
-        start_time = time.time()
-        while True:
-            get_result = self.get(name)
-            if get_result.status not in ("live", "updating"):
-                # avoids boot loop
-                self.delete(name)
-                raise ValueError(f"Deployment {name} failed with status {get_result.status}.")
+                if print_logs:
+                    self._cortex_logs_print_async(name)
 
-            elif get_result.status == "live":
-                break
+                start_time = time.time()
+                while True:
+                    get_result = self.get(name)
+                    time_since_start = ceil(time.time() - start_time)
+                    if get_result.status == LIVE_STATUS:
+                        return get_result
 
-            if start_time + deployment_timeout_sec < time.time():
-                # avoids boot loop
-                self.delete(name)
-                raise ValueError(f"Deployment {name} timeout after {deployment_timeout_sec} seconds.")
+                    elif get_result.status == COMPUTE_UNAVAILABLE_STATUS:
+                        self.delete(name)
+                        raise DeploymentFailed(
+                            f'Deployment of {name} API could not start due to insufficient memory, CPU, GPU or Inf in the cluster after {time_since_start} secs.',
+                            COMPUTE_UNAVAILABLE_FAIL_TYPE, name, time_since_start)
 
-            logger.info(f"Sleeping during deployment of {name} until next retry. Current get_result: {get_result}.")
-            time.sleep(10)
+                    elif get_result.status != UPDATING_STATUS:
+                        self.delete(name)
+                        raise DeploymentFailed(f"Deployment of {name} failed with status {get_result.status} after {time_since_start} secs.",
+                                               DEPLOYMENT_ERROR_FAIL_TYPE, name, time_since_start)
 
-        return get_result
+                    if time_since_start > deployment_timeout_sec:
+                        self.delete(name)
+                        raise DeploymentFailed(f"Deployment of {name} timed out after {deployment_timeout_sec} secs.",
+                                               DEPLOYMENT_TIMEOUT_FAIL_TYPE, name, time_since_start)
+
+                    logger.info(f"Sleeping during deployment of {name} until next retry. Current get_result: {get_result}.")
+                    time.sleep(10)
+
+            except DeploymentFailed as e:
+                if retry == n_retries or e.failure_type == DEPLOYMENT_ERROR_FAIL_TYPE:
+                    raise e
+
+                else:
+                    sleep_secs = ceil(CORTEX_DEPLOY_RETRY_BASE_SLEEP_SEC * 2 ** retry)
+                    logger.warning(f'Retrying {retry + 1} time after sleep of {sleep_secs} secs due to deployment failure: {e}')
+
+        raise RuntimeError('Execution should never reach here.')
+
 
     @contextmanager
     def deploy_temporarily(
@@ -145,6 +176,7 @@ class CortexClient:
         deployment_timeout_sec=CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT,
         api_timeout_sec=CORTEX_DEFAULT_API_TIMEOUT,
         print_logs=False,
+        n_retries=0
     ) -> 'CortexGetResult':
         """
         Deploy an API until timeouts. Cortex docs https://docs.cortex.dev/deployments/deployment.
@@ -163,6 +195,8 @@ class CortexClient:
             Time until API will be auto-deleted. Use `INFINITE_TIMEOUT_SEC` for infinite.
         print_logs
             Subscribe to Cortex logs of the API and print them to stdout.
+        n_retries
+            Number of attempts to deploy until raising the failure. Retries only if the failure is not an application error.
 
         Returns
         -------
@@ -172,7 +206,7 @@ class CortexClient:
         """
 
         try:
-            yield self.deploy_single(deployment, dir, deployment_timeout_sec, api_timeout_sec, print_logs)
+            yield self.deploy_single(deployment, dir, deployment_timeout_sec, api_timeout_sec, print_logs, n_retries)
 
         finally:
             self.delete(deployment["name"])
@@ -209,7 +243,7 @@ class CortexClient:
     def _parse_get_deployed(cmd_out: str):
         lines = cmd_out.splitlines()
         status = lines[2].split("  ")[0].strip()
-        if status == "live":
+        if status == LIVE_STATUS:
             for line in lines:
                 line_split = line.split(" ")
                 if line_split[0] == "endpoint:":
@@ -393,9 +427,10 @@ def _verbose_command_wrapper(
                 logger.warning(f"Allowed unsuccessful command {cmd_arr} execution. Stdout {json.dumps(stdout)} or stderr {json.dumps(stderr)} matches one of {allow_non_0_return_code_on_stdout_sub_strs}")
                 return stdout
 
-            message = f"Non zero return code for command {cmd_str}! Stdout:\n{json.dumps(stdout)}"
-            if retry <= retry_count:
-                logger.info(message)
+            else:
+                message = f"Non zero return code for command {cmd_str}! Stdout:\n{json.dumps(stdout)}"
+                if retry <= retry_count:
+                    logger.info(message)
 
         except subprocess.TimeoutExpired as e:
             timeout_message = f'{e} with stdout: "{e.output}" and stderr: "{e.stderr}"'

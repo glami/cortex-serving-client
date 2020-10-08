@@ -1,5 +1,9 @@
 import logging
 import unittest
+from unittest.mock import patch
+
+from cortex_serving_client.deployment_failed import DeploymentFailed, DEPLOYMENT_TIMEOUT_FAIL_TYPE, \
+    DEPLOYMENT_ERROR_FAIL_TYPE
 
 logging.basicConfig(
     format="%(asctime)s : %(levelname)s : %(threadName)-10s : %(name)s : %(message)s", level=logging.INFO
@@ -67,12 +71,38 @@ class IntegrationTests(unittest.TestCase):
             ) as get_result:
                 self.fail(f'Deployment should fail but {get_result.status}.')
 
-        except ValueError as e:
-            self.assertIn('failed with status error', str(e))
+        except DeploymentFailed as e:
+            self.assertEqual(e.failure_type, DEPLOYMENT_ERROR_FAIL_TYPE)
 
         self.assertEqual(self.cortex.get(deployment['name']).status, 'not_deployed')
 
+    def test_deploy_timeout_fail(self):
+        deployment = dict(
+            name='timeout-api',
+            predictor=dict(
+                type='python',
+                path='yes_predictor.py',
+            ),
+            compute=dict(
+                cpu=1,
+            )
+        )
 
+        try:
+            with patch(target="cortex_serving_client.cortex_client.CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT", new=0):
+                with self.cortex.deploy_temporarily(
+                    deployment,
+                    dir="./",
+                    api_timeout_sec=10 * 60,
+                    print_logs=True,
+                    deployment_timeout_sec=0
+                ) as get_result:
+                    self.fail(f'Deployment should fail but {get_result.status}.')
+
+        except DeploymentFailed as e:
+            self.assertEqual(e.failure_type, DEPLOYMENT_TIMEOUT_FAIL_TYPE)
+
+        self.assertEqual(self.cortex.get(deployment['name']).status, 'not_deployed')
 
 
 
