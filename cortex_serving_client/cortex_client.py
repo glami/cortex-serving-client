@@ -37,6 +37,8 @@ CORTEX_DEPLOY_REPORTED_TIMEOUT_SEC = 60
 CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT = 20 * 60
 CORTEX_DEFAULT_API_TIMEOUT = CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT
 CORTEX_DEPLOY_RETRY_BASE_SLEEP_SEC = 5 * 60
+CORTEX_CMD_BASE_RETRY_SEC = 5
+CORTEX_STATUS_CHECK_SLEEP_SEC = 10
 INFINITE_TIMEOUT_SEC = 30 * 365 * 24 * 60 * 60  # 30 years
 CORTEX_DEFAULT_COMMAND_SYSTEM_PROCESS_TIMEOUT = 3 * 60
 
@@ -154,8 +156,8 @@ class CortexClient:
                         raise DeploymentFailed(f"Deployment of {name} timed out after {deployment_timeout_sec} secs.",
                                                DEPLOYMENT_TIMEOUT_FAIL_TYPE, name, time_since_start)
 
-                    logger.info(f"Sleeping during deployment of {name} until next retry. Current get_result: {get_result}.")
-                    time.sleep(10)
+                    logger.info(f"Sleeping during deployment of {name} until next status check. Current get_result: {get_result}.")
+                    time.sleep(CORTEX_STATUS_CHECK_SLEEP_SEC)
 
             except DeploymentFailed as e:
                 if retry == n_retries or e.failure_type == DEPLOYMENT_ERROR_FAIL_TYPE:
@@ -164,6 +166,7 @@ class CortexClient:
                 else:
                     sleep_secs = ceil(CORTEX_DEPLOY_RETRY_BASE_SLEEP_SEC * 2 ** retry)
                     logger.warning(f'Retrying {retry + 1} time after sleep of {sleep_secs} secs due to deployment failure: {e}')
+                    time.sleep(sleep_secs)
 
         raise RuntimeError('Execution should never reach here.')
 
@@ -281,8 +284,8 @@ class CortexClient:
                         f"Timeout after {timeout_sec} seconds. Attempted force delete, but not waiting for results."
                     )
 
-                logger.info(f"During delete of {name} sleeping until next retry. Current get_result: {get_result}.")
-                time.sleep(10)
+                logger.info(f"During delete of {name} sleeping until next status check. Current get_result: {get_result}.")
+                time.sleep(CORTEX_STATUS_CHECK_SLEEP_SEC)
 
         finally:
             self._open_cursor_if_none(cursor, self._del_db_api_row, name)
@@ -429,7 +432,7 @@ def _verbose_command_wrapper(
 ):
     cmd_str = " ".join(cmd_arr)
     message = ""
-    for retry in range(retry_count):
+    for retry in range(retry_count + 1):
         try:
             p = subprocess.run(cmd_arr, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd, timeout=timeout, input=input)
             stdout = p.stdout.decode()
@@ -445,20 +448,19 @@ def _verbose_command_wrapper(
 
             else:
                 message = f"Non zero return code for command {cmd_str}! Stdout:\n{json.dumps(stdout)}"
-                if retry <= retry_count:
-                    logger.info(message)
 
         except subprocess.TimeoutExpired as e:
-            timeout_message = f'{e} with stdout: "{e.output}" and stderr: "{e.stderr}"'
-            if retry <= retry_count:
-                logger.info(f"Retrying command {cmd_str} ignoring exception: " + timeout_message)
+            message = f'Timed out command  {cmd_str}: {e} with stdout: "{json.dumps(e.output)}" and stderr: "{json.dumps(e.stderr)}"'
 
-            else:
-                raise ValueError(f"Retry count for command {cmd_str} exceeded: " + timeout_message) from e
+        if retry < retry_count:
+            sleep_secs = ceil(CORTEX_CMD_BASE_RETRY_SEC * 2 ** retry)
+            logger.info(f"Retrying after {sleep_secs} sec: {message}")
+            time.sleep(sleep_secs)
 
-        time.sleep(3)
+        else:
+            raise ValueError(f"Retry count for command {cmd_str} exceeded: {message}")
 
-    raise ValueError(f"Retry count for command {cmd_str} exceeded: " + message)
+    raise RuntimeError(f'Execution should never reach here: {message}')
 
 
 class CortexGetAllStatus(NamedTuple):
