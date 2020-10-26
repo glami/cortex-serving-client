@@ -450,7 +450,7 @@ def _verbose_command_wrapper(
                 message = f"Non zero return code for command {cmd_str}! Stdout:\n{json.dumps(stdout)}"
 
         except subprocess.TimeoutExpired as e:
-            message = f'Timed out command  {cmd_str}: {e} with stdout: "{json.dumps(e.output)}" and stderr: "{json.dumps(e.stderr)}"'
+            message = f'Timed out command  {cmd_str}: {e} with stdout: "{e.output}" and stderr: "{e.stderr}"'
 
         if retry < retry_count:
             sleep_secs = ceil(CORTEX_CMD_BASE_RETRY_SEC * 2 ** retry)
