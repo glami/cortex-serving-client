@@ -17,6 +17,7 @@ from psycopg2._psycopg import DatabaseError
 from psycopg2.extras import NamedTupleCursor
 from psycopg2.pool import ThreadedConnectionPool
 
+from cortex_serving_client.command_line_wrapper import _verbose_command_wrapper
 from cortex_serving_client.deployment_failed import DeploymentFailed, COMPUTE_UNAVAILABLE_FAIL_TYPE, \
     DEPLOYMENT_TIMEOUT_FAIL_TYPE, DEPLOYMENT_ERROR_FAIL_TYPE
 from cortex_serving_client.printable_chars import remove_non_printable
@@ -37,10 +38,8 @@ CORTEX_DEPLOY_REPORTED_TIMEOUT_SEC = 60
 CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT = 20 * 60
 CORTEX_DEFAULT_API_TIMEOUT = CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT
 CORTEX_DEPLOY_RETRY_BASE_SLEEP_SEC = 5 * 60
-CORTEX_CMD_BASE_RETRY_SEC = 5
 CORTEX_STATUS_CHECK_SLEEP_SEC = 10
 INFINITE_TIMEOUT_SEC = 30 * 365 * 24 * 60 * 60  # 30 years
-CORTEX_DEFAULT_COMMAND_SYSTEM_PROCESS_TIMEOUT = 3 * 60
 
 
 logger = logging.getLogger('cortex_client')
@@ -424,43 +423,6 @@ def open_pg_cursor(db_connection_pool, key=None):
 
     finally:
         db_connection_pool.putconn(conn, key)
-
-
-def _verbose_command_wrapper(
-        cmd_arr: List[str], cwd: str = None, timeout: int = CORTEX_DEFAULT_COMMAND_SYSTEM_PROCESS_TIMEOUT,
-        input: bytes = None, retry_count=3, allow_non_0_return_code_on_stdout_sub_strs=None
-):
-    cmd_str = " ".join(cmd_arr)
-    message = ""
-    for retry in range(retry_count + 1):
-        try:
-            p = subprocess.run(cmd_arr, stdout=subprocess.PIPE, stderr=subprocess.PIPE, cwd=cwd, timeout=timeout, input=input)
-            stdout = p.stdout.decode()
-            stderr = p.stderr.decode()
-            # check_returncode() does not print process output to the console automatically so custom below
-            if p.returncode == 0:
-                logger.debug(f"Successful command {cmd_arr} stdout is {json.dumps(stdout)}")
-                return stdout
-
-            elif allow_non_0_return_code_on_stdout_sub_strs is not None and any([s in stdout or s in stderr for s in allow_non_0_return_code_on_stdout_sub_strs]):
-                logger.warning(f"Allowed unsuccessful command {cmd_arr} execution. Stdout {json.dumps(stdout)} or stderr {json.dumps(stderr)} matches one of {allow_non_0_return_code_on_stdout_sub_strs}")
-                return stdout
-
-            else:
-                message = f"Non zero return code for command {cmd_str}! Stdout:\n{json.dumps(stdout)}"
-
-        except subprocess.TimeoutExpired as e:
-            message = f'Timed out command  {cmd_str}: {e} with stdout: "{e.output}" and stderr: "{e.stderr}"'
-
-        if retry < retry_count:
-            sleep_secs = ceil(CORTEX_CMD_BASE_RETRY_SEC * 2 ** retry)
-            logger.info(f"Retrying after {sleep_secs} sec: {message}")
-            time.sleep(sleep_secs)
-
-        else:
-            raise ValueError(f"Retry count for command {cmd_str} exceeded: {message}")
-
-    raise RuntimeError(f'Execution should never reach here: {message}')
 
 
 class CortexGetAllStatus(NamedTuple):

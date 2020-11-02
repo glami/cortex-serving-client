@@ -65,4 +65,10 @@ class CortexClientTest(unittest.TestCase):
             print(f'{e} with stdout: "{e.output}" and stderr: "{e.stderr}"')
 
     def test_not_deployed(self):
-        _verbose_command_wrapper(['cat', 'not_deployed'], allow_non_0_return_code_on_stdout_sub_strs=['not_deployed'])
+        _verbose_command_wrapper(['cat', 'not_deployed'], allow_non_0_return_code_on_stdout_sub_strs=['not_deployed'], timeout=1, sleep_base_retry_sec=0.1)
+        try:
+            _verbose_command_wrapper(['cat', 'not_deployed'], timeout=1, sleep_base_retry_sec=0.1)
+            self.fail()
+
+        except ValueError as e:
+            pass
