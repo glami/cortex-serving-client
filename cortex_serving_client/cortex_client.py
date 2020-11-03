@@ -287,7 +287,7 @@ class CortexClient:
 
                     else:
                         logger.error(f'Timeout of delete cmd {delete_cmd} after {timeout_sec} seconds. Will attempt to force delete now.')
-                        return self.delete(name, force=True, cursor=cursor)
+                        return self.delete(name, force=True, timeout_sec=timeout_sec, cursor=cursor)
 
                 logger.info(f"During delete of {name} sleeping until next status check. Current get_result: {get_result}.")
                 time.sleep(CORTEX_STATUS_CHECK_SLEEP_SEC)
