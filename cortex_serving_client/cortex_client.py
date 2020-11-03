@@ -1,6 +1,5 @@
 import contextlib
 import io
-import json
 import logging
 import os
 import re
@@ -261,9 +260,13 @@ class CortexClient:
         return cortex_parse_get_all(out)
 
     def delete(self, name, force=False, timeout_sec=CORTEX_DELETE_TIMEOUT_SEC, cursor=None) -> "CortexGetResult":
-        delete_arr = ["cortex", "delete", name, f"--env={self.cortex_env}"]
+        """
+        Executes delete and checks that the API was deleted. If not tries force delete. If that fails, raises exception.
+        """
+
+        delete_cmd = ["cortex", "delete", name, f"--env={self.cortex_env}"]
         if force:
-            delete_arr.append("-f")
+            delete_cmd.append("-f")
 
         accept_deletion_if_asked_input = b"y\n"
         try:
@@ -275,13 +278,16 @@ class CortexClient:
                     return get_result
 
                 else:
-                    _verbose_command_wrapper(delete_arr, input=accept_deletion_if_asked_input,
+                    _verbose_command_wrapper(delete_cmd, input=accept_deletion_if_asked_input,
                                              allow_non_0_return_code_on_stdout_sub_strs=['not deployed'])
 
                 if start_time + timeout_sec < time.time():
-                    raise ValueError(
-                        f"Timeout after {timeout_sec} seconds. Attempted force delete, but not waiting for results."
-                    )
+                    if force:
+                        raise ValueError(f'Timeout of force delete {delete_cmd} after {timeout_sec}.')
+
+                    else:
+                        logger.error(f'Timeout of delete cmd {delete_cmd} after {timeout_sec} seconds. Will attempt to force delete now.')
+                        return self.delete(name, force=True, cursor=cursor)
 
                 logger.info(f"During delete of {name} sleeping until next status check. Current get_result: {get_result}.")
                 time.sleep(CORTEX_STATUS_CHECK_SLEEP_SEC)

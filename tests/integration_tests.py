@@ -44,8 +44,8 @@ class IntegrationTests(unittest.TestCase):
                 print_logs=True,
         ) as get_result:
             result = post(get_result.endpoint, json={}).json()
-            # extra delete can occur, should not cause failure
-            self.cortex.delete(deployment['name'])
+            # extra delete can occur, should not cause failure. Non-force deletes are tested in other cases.
+            self.cortex.delete(deployment['name'], force=True)
 
         self.assertTrue(result['yes'])
         self.assertEqual(self.cortex.get(deployment['name']).status, 'not_deployed')
