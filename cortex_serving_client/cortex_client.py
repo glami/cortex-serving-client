@@ -36,6 +36,7 @@ CORTEX_DELETE_TIMEOUT_SEC = 10 * 60
 CORTEX_DEPLOY_REPORTED_TIMEOUT_SEC = 60
 CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT = 20 * 60
 CORTEX_DEFAULT_API_TIMEOUT = CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT
+CORTEX_MIN_API_TIMEOUT_SEC = CORTEX_DELETE_TIMEOUT_SEC
 CORTEX_DEPLOY_RETRY_BASE_SLEEP_SEC = 5 * 60
 CORTEX_STATUS_CHECK_SLEEP_SEC = 10
 INFINITE_TIMEOUT_SEC = 30 * 365 * 24 * 60 * 60  # 30 years
@@ -94,17 +95,13 @@ class CortexClient:
         name = deployment["name"]
         predictor_yaml_str = yaml.dump([deployment], default_flow_style=False)
 
-        if api_timeout_sec < CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT:
-            logger.info(f'API timeout {api_timeout_sec} is be smaller than default deployment timeout {CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT}. Setting it to {CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT}.')
-            api_timeout_sec = CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT
+        if api_timeout_sec < CORTEX_MIN_API_TIMEOUT_SEC:
+            logger.info(f'API timeout {api_timeout_sec} is be smaller than minimal API timeout {CORTEX_MIN_API_TIMEOUT_SEC}. Setting it to {CORTEX_MIN_API_TIMEOUT_SEC} to avoid excessive GC.')
+            api_timeout_sec = CORTEX_MIN_API_TIMEOUT_SEC
 
         if deployment_timeout_sec < CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT:
-            logger.info(f'Deployment timeout {api_timeout_sec} is be smaller than default deployment timeout {CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT}. Setting it to {CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT}.')
+            logger.info(f'Deployment timeout {deployment_timeout_sec} is be smaller than default deployment timeout {CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT}. Setting it to {CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT}.')
             deployment_timeout_sec = CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT
-
-        if api_timeout_sec < deployment_timeout_sec:
-            logger.warning(f'API timeout for {name} of {api_timeout_sec} is shorter than deployment timeout of {deployment_timeout_sec}. This may cause unintended garbage collection! Setting API timeout to deployment timeout.')
-            api_timeout_sec = deployment_timeout_sec
 
         # file has to be created the dir to which python predictors are described in yaml
         filename = f"{name}.yaml"
@@ -114,18 +111,9 @@ class CortexClient:
             try:
                 self._collect_garbage()
                 with str_to_public_temp_file(predictor_yaml_str, filepath):
-                    gc_timeout_sec = api_timeout_sec + CORTEX_DELETE_TIMEOUT_SEC
-                    logger.info(f"Deployment {name} has deployment timeout: {deployment_timeout_sec} sec, garbage collection timeout: {gc_timeout_sec} seconds.")
-                    with self._open_db_cursor() as cursor:
-                        cursor.execute(
-                            """
-                            insert into cortex_api_timeout(api_name, ultimate_timeout) values (%s, transaction_timestamp() + %s * interval '1 second')
-                            on conflict (api_name) do update
-                                set ultimate_timeout = transaction_timestamp() + %s * interval '1 second', modified = transaction_timestamp()
-                        """,
-                            [name, gc_timeout_sec, gc_timeout_sec],
-                        )
-
+                    gc_timeout_sec = deployment_timeout_sec + CORTEX_DELETE_TIMEOUT_SEC
+                    logger.info(f"Deployment {name} has deployment timeout {deployment_timeout_sec}sec and GC timeout {gc_timeout_sec}sec.")
+                    self._insert_or_update_gc_timeout(name, gc_timeout_sec)
                     _verbose_command_wrapper(["cortex", "deploy", filename, f"--env={self.cortex_env}"], cwd=dir)
 
                 if print_logs:
@@ -136,6 +124,9 @@ class CortexClient:
                     get_result = self.get(name)
                     time_since_start = ceil(time.time() - start_time)
                     if get_result.status == LIVE_STATUS:
+                        gc_timeout_sec = api_timeout_sec + CORTEX_DELETE_TIMEOUT_SEC
+                        logger.info(f"Deployment {name} successful. Setting API timeout {api_timeout_sec}sec and GC timeout {gc_timeout_sec}sec.")
+                        self._insert_or_update_gc_timeout(name, gc_timeout_sec)
                         return get_result
 
                     elif get_result.status == COMPUTE_UNAVAILABLE_STATUS:
@@ -320,6 +311,17 @@ class CortexClient:
 
         except DatabaseError:
             logger.warning(f"Ignoring exception during cortex_api_timeout record for {name} modifying ultimate_timeout to delete the api", exc_info=True)
+
+    def _insert_or_update_gc_timeout(self, name: str, gc_timeout_seconds_from_now: float):
+        with self._open_db_cursor() as cursor:
+            cursor.execute(
+                """
+                insert into cortex_api_timeout(api_name, ultimate_timeout) values (%s, transaction_timestamp() + %s * interval '1 second')
+                on conflict (api_name) do update
+                    set ultimate_timeout = transaction_timestamp() + %s * interval '1 second', modified = transaction_timestamp()
+            """,
+                [name, gc_timeout_seconds_from_now, gc_timeout_seconds_from_now],
+            )
 
     @staticmethod
     def _del_db_api_row(cur, name):
