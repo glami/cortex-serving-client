@@ -1,17 +1,17 @@
 import logging
-import unittest
-from unittest.mock import patch
-
-from cortex_serving_client.deployment_failed import DeploymentFailed, DEPLOYMENT_TIMEOUT_FAIL_TYPE, \
-    DEPLOYMENT_ERROR_FAIL_TYPE
 
 logging.basicConfig(
     format="%(asctime)s : %(levelname)s : %(threadName)-10s : %(name)s : %(message)s", level=logging.INFO
 )
 
+
+from unittest.mock import patch
 from requests import post
+import unittest
 
 from cortex_serving_client.cortex_client import get_cortex_client_instance
+from cortex_serving_client.deployment_failed import DeploymentFailed, DEPLOYMENT_TIMEOUT_FAIL_TYPE, \
+    DEPLOYMENT_ERROR_FAIL_TYPE
 
 
 class IntegrationTests(unittest.TestCase):
