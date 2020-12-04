@@ -12,6 +12,7 @@ from threading import Thread
 from typing import NamedTuple, Optional, Dict, List, Callable
 
 import yaml
+from cortex.binary import get_cli_path
 from psycopg2._psycopg import DatabaseError
 from psycopg2.extras import NamedTupleCursor
 from psycopg2.pool import ThreadedConnectionPool
@@ -21,6 +22,9 @@ from cortex_serving_client.deployment_failed import DeploymentFailed, COMPUTE_UN
     DEPLOYMENT_TIMEOUT_FAIL_TYPE, DEPLOYMENT_ERROR_FAIL_TYPE
 from cortex_serving_client.printable_chars import remove_non_printable
 
+KIND_DEFAULT_REALTIME_API = 'RealtimeAPI'
+
+NOT_DEPLOYED = "not deployed"
 
 """
 Details: https://www.cortex.dev/deployments/statuses
@@ -41,6 +45,7 @@ CORTEX_DEPLOY_RETRY_BASE_SLEEP_SEC = 5 * 60
 CORTEX_STATUS_CHECK_SLEEP_SEC = 10
 INFINITE_TIMEOUT_SEC = 30 * 365 * 24 * 60 * 60  # 30 years
 
+CORTEX_PATH = get_cli_path()
 
 logger = logging.getLogger('cortex_client')
 __cortex_client_instance = None
@@ -55,6 +60,7 @@ class CortexClient:
         self.db_connection_pool = db_connection_pool
         self._init_garbage_api_collector(gc_interval_sec)
         self.cortex_env = cortex_env
+        logger.info(f'Constructing CortexClient for {CORTEX_PATH}.')
 
     def deploy_single(
         self,
@@ -93,6 +99,9 @@ class CortexClient:
         """
 
         name = deployment["name"]
+        if "kind" not in deployment:
+            deployment["kind"] = KIND_DEFAULT_REALTIME_API
+
         predictor_yaml_str = yaml.dump([deployment], default_flow_style=False)
 
         if api_timeout_sec < CORTEX_MIN_API_TIMEOUT_SEC:
@@ -220,12 +229,14 @@ class CortexClient:
             raise ValueError("Cluster is likely down! Check the exception text") from e
 
     def get(self, name) -> "CortexGetResult":
-        out = _verbose_command_wrapper(["cortex", "get", name, f"--env={self.cortex_env}"])
+        out = _verbose_command_wrapper([CORTEX_PATH, "get", name, f"--env={self.cortex_env}"], allow_non_0_return_code_on_stdout_sub_strs=[NOT_DEPLOYED])
         lines = out.splitlines()
-        if lines[1].split(" ")[0] == "status":
+        first_line = lines[0] if len(lines) > 0 else ''
+        second_line = lines[1] if len(lines) > 1 else ''
+        if len(second_line.split(" ")) > 0 and second_line.split(" ")[0] == "status":
             return self._parse_get_deployed(out)
 
-        elif "not deployed" in lines[1]:
+        elif NOT_DEPLOYED in first_line:
             return CortexGetResult("not_deployed", None)
 
         else:

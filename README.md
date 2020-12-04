@@ -9,7 +9,7 @@ It is a Python wrapper around [Cortex's command-line client](https://cortex.dev)
 - Prevent accidental charges by auto-removing deployments that exceeded a timeout.
 - Execute operations: deploy, delete, get, get all.
 - Stream remote logs into the local log with thread name set to the API name.
-- Supported Cortex Version: 0.18
+- Supported Cortex Version: 0.23
 
 Here is [a video about the package](https://youtu.be/aU95dBAspr0?t=510).
 
@@ -77,7 +77,6 @@ This tutorial will help you to get [the basic example](/example/example.py) runn
 - Postgres
 
 
-
 ### Setup Database
 Follow below instuctions to configure local database,
 or configure cluster database,
@@ -92,10 +91,7 @@ grant all privileges on database cortext_test to cortex_test;
 ```
 
 ### Install Cortex
-Install supported [Cortex.dev](https://cortex.dev) version:
-```bash
-bash -c "$(curl -sS https://raw.githubusercontent.com/cortexlabs/cortex/0.18/get-cli.sh)";
-```
+Supported [Cortex.dev](https://cortex.dev) version is a Python dependency version.
 
 This example runs in a simulated local cluster in local docker. To execute it in an AWS cluster, follow [this Cortex tutorial](https://docs.cortex.dev/install#running-at-scale-on-aws),
 and then change `cortex_env` from `'local'` with `'aws'` in the [the test script](/example/example.py).
