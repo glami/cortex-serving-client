@@ -11,6 +11,7 @@ from math import ceil
 from threading import Thread
 from typing import NamedTuple, Optional, Dict, List, Callable
 
+import cortex
 import yaml
 from cortex.binary import get_cli_path
 from psycopg2._psycopg import DatabaseError
@@ -60,6 +61,7 @@ class CortexClient:
         self.db_connection_pool = db_connection_pool
         self._init_garbage_api_collector(gc_interval_sec)
         self.cortex_env = cortex_env
+        self.cortex_vanilla = cortex.Client(env=self.cortex_env)
         logger.info(f'Constructing CortexClient for {CORTEX_PATH}.')
 
     def deploy_single(
@@ -123,7 +125,7 @@ class CortexClient:
                     gc_timeout_sec = deployment_timeout_sec + CORTEX_DELETE_TIMEOUT_SEC
                     logger.info(f"Deployment {name} has deployment timeout {deployment_timeout_sec}sec and GC timeout {gc_timeout_sec}sec.")
                     self._insert_or_update_gc_timeout(name, gc_timeout_sec)
-                    _verbose_command_wrapper(["cortex", "deploy", filename, f"--env={self.cortex_env}"], cwd=dir)
+                    _verbose_command_wrapper([CORTEX_PATH, "deploy", filename, f"--env={self.cortex_env}", "--yes"], cwd=dir)
 
                 if print_logs:
                     self._cortex_logs_print_async(name)
@@ -223,7 +225,7 @@ class CortexClient:
     def raise_on_cluster_down(self):
         try:
             input_in_case_endpoint_prompt = b"n\n"
-            _verbose_command_wrapper(["cortex", "get", f"--env={self.cortex_env}"], input=input_in_case_endpoint_prompt)
+            _verbose_command_wrapper([CORTEX_PATH, "get", f"--env={self.cortex_env}"], input=input_in_case_endpoint_prompt)
 
         except ValueError as e:
             raise ValueError("Cluster is likely down! Check the exception text") from e
@@ -258,7 +260,7 @@ class CortexClient:
         return CortexGetResult(status, None)
 
     def get_all(self) -> List["CortexGetAllStatus"]:
-        out = _verbose_command_wrapper(["cortex", "get", f"--env={self.cortex_env}"])
+        out = _verbose_command_wrapper([CORTEX_PATH, "get", f"--env={self.cortex_env}"])
         return cortex_parse_get_all(out)
 
     def delete(self, name, force=False, timeout_sec=CORTEX_DELETE_TIMEOUT_SEC, cursor=None) -> "CortexGetResult":
@@ -266,7 +268,7 @@ class CortexClient:
         Executes delete and checks that the API was deleted. If not tries force delete. If that fails, raises exception.
         """
 
-        delete_cmd = ["cortex", "delete", name, f"--env={self.cortex_env}"]
+        delete_cmd = [CORTEX_PATH, "delete", name, f"--env={self.cortex_env}"]
         if force:
             delete_cmd.append("-f")
 
@@ -299,7 +301,7 @@ class CortexClient:
 
     def _cortex_logs_print_async(self, name):
         def listen_on_logs():
-            with subprocess.Popen(["cortex", "logs", name, f"--env={self.cortex_env}"], stdout=subprocess.PIPE) as logs_sp:
+            with subprocess.Popen([CORTEX_PATH, "logs", name, f"--env={self.cortex_env}"], stdout=subprocess.PIPE) as logs_sp:
                 with io.TextIOWrapper(logs_sp.stdout, encoding="utf-8") as logs_out:
                     for line in logs_out:
                         print_line = remove_non_printable(line.rstrip('\n'))
