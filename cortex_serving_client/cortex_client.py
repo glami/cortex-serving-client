@@ -1,5 +1,6 @@
 import contextlib
 import io
+import json
 import logging
 import os
 import re
@@ -7,35 +8,47 @@ import subprocess
 import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta
+from json import JSONDecodeError
 from math import ceil
 from threading import Thread
 from typing import NamedTuple, Optional, Dict, List, Callable
 
 import cortex
+import requests
 import yaml
 from cortex.binary import get_cli_path
 from psycopg2._psycopg import DatabaseError
 from psycopg2.extras import NamedTupleCursor
 from psycopg2.pool import ThreadedConnectionPool
+from requests.adapters import HTTPAdapter, Retry
 
 from cortex_serving_client.command_line_wrapper import _verbose_command_wrapper
 from cortex_serving_client.deployment_failed import DeploymentFailed, COMPUTE_UNAVAILABLE_FAIL_TYPE, \
     DEPLOYMENT_TIMEOUT_FAIL_TYPE, DEPLOYMENT_ERROR_FAIL_TYPE
 from cortex_serving_client.printable_chars import remove_non_printable
 
-KIND_DEFAULT_REALTIME_API = 'RealtimeAPI'
+
+KIND_REALTIME_API = 'RealtimeAPI'
+KIND_BATCH_API = 'BatchAPI'
+KIND_DEFAULT = KIND_REALTIME_API
 
 NOT_DEPLOYED = "not deployed"
 
 """
-Details: https://www.cortex.dev/deployments/statuses
+Source: https://github.com/cortexlabs/cortex/blob/0.23/pkg/types/status/code.go
 On some places custom "not_deployed" status may be used.
 """
 
-LIVE_STATUS = "live"
-UPDATING_STATUS = "updating"
-COMPUTE_UNAVAILABLE_STATUS = "compute unavailable"
-CORTEX_STATUSES = [LIVE_STATUS, UPDATING_STATUS, "error", "error (out of memory)", COMPUTE_UNAVAILABLE_STATUS]  #
+LIVE_STATUS = "status_live"
+UPDATING_STATUS = "status_updating"
+COMPUTE_UNAVAILABLE_STATUS = "status_stalled"
+CORTEX_STATUSES = [LIVE_STATUS, UPDATING_STATUS, "status_error", "status_oom", COMPUTE_UNAVAILABLE_STATUS]  #
+NOT_DEPLOYED_STATUS = "status_not_deployed"
+
+JOB_STATUS_SUCCEEDED = 'status_succeeded'
+JOB_STATUS_ENQUEUING = 'status_enqueuing'
+JOB_STATUS_RUNNING = 'status_running'
+
 
 CORTEX_DELETE_TIMEOUT_SEC = 10 * 60
 CORTEX_DEPLOY_REPORTED_TIMEOUT_SEC = 60
@@ -61,7 +74,7 @@ class CortexClient:
         self.db_connection_pool = db_connection_pool
         self._init_garbage_api_collector(gc_interval_sec)
         self.cortex_env = cortex_env
-        self.cortex_vanilla = cortex.Client(env=self.cortex_env)
+        self.cortex_vanilla = cortex.client(self.cortex_env)
         logger.info(f'Constructing CortexClient for {CORTEX_PATH}.')
 
     def deploy_single(
@@ -102,7 +115,7 @@ class CortexClient:
 
         name = deployment["name"]
         if "kind" not in deployment:
-            deployment["kind"] = KIND_DEFAULT_REALTIME_API
+            deployment["kind"] = KIND_DEFAULT
 
         predictor_yaml_str = yaml.dump([deployment], default_flow_style=False)
 
@@ -214,6 +227,38 @@ class CortexClient:
         finally:
             self.delete(deployment["name"])
 
+    def deploy_batch_api_and_run_job(self,
+                                     deployment,
+                                     job_spec,
+                                     dir,
+                                     deployment_timeout_sec=CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT,
+                                     api_timeout_sec=CORTEX_DEFAULT_API_TIMEOUT,
+                                     print_logs=False,
+                                     n_retries=0):
+
+        with self.deploy_temporarily(
+                deployment,
+                dir=dir,
+                deployment_timeout_sec=deployment_timeout_sec,
+                api_timeout_sec=api_timeout_sec,
+                print_logs=print_logs,
+                n_retries=n_retries
+        ) as get_result:
+            logger.info(f'BatchAPI {deployment["name"]} deployed. Starting a job.')
+            s = requests.Session()
+            http_adapter = HTTPAdapter(max_retries=Retry(total=5, backoff_factor=3))
+            s.mount('http://', http_adapter)
+            s.mount('https://', http_adapter)
+            job_json = s.post(get_result.endpoint, json=job_spec, timeout=10 * 60).json()
+            job_id = job_json['job_id']
+            job_status = JOB_STATUS_ENQUEUING
+            while job_status in (JOB_STATUS_ENQUEUING, JOB_STATUS_RUNNING):
+                job_json = json.loads(_verbose_command_wrapper([CORTEX_PATH, "get", deployment["name"], job_id, "--env", self.cortex_env, "-o", "json"]).strip())
+                job_status = job_json['job_status']["status"]
+
+            logger.info(f'BatchAPI {deployment["name"]} job {job_id} ended with status {job_status}. Deleting the BatchAPI.')
+            return job_json
+
     def postpone_api_timeout(self, name: str, timeout_timestamp: datetime):
         ultimate_timeout = timeout_timestamp + timedelta(seconds=CORTEX_DELETE_TIMEOUT_SEC)
         with self._open_db_cursor() as cursor:
@@ -231,15 +276,26 @@ class CortexClient:
             raise ValueError("Cluster is likely down! Check the exception text") from e
 
     def get(self, name) -> "CortexGetResult":
-        out = _verbose_command_wrapper([CORTEX_PATH, "get", name, f"--env={self.cortex_env}"], allow_non_0_return_code_on_stdout_sub_strs=[NOT_DEPLOYED])
+        out = _verbose_command_wrapper([CORTEX_PATH, "get", name, f"--env={self.cortex_env}", "-o=json"], allow_non_0_return_code_on_stdout_sub_strs=[NOT_DEPLOYED])
+        try:
+            json_dict = json.loads(out.strip())
+
+        except JSONDecodeError as e:
+            logger.debug(f'Encountered {e} but ignoring.')
+            json_dict = None
+
         lines = out.splitlines()
         first_line = lines[0] if len(lines) > 0 else ''
-        second_line = lines[1] if len(lines) > 1 else ''
-        if len(second_line.split(" ")) > 0 and second_line.split(" ")[0] == "status":
-            return self._parse_get_deployed(out)
+        if json_dict is not None:
+            json_dict = json_dict[0]
+            if json_dict['spec']['kind'] == KIND_BATCH_API:
+                return CortexGetResult(LIVE_STATUS, json_dict['endpoint'])
+
+            else:
+                return CortexGetResult(json_dict['status']['status_code'], json_dict['endpoint'])
 
         elif NOT_DEPLOYED in first_line:
-            return CortexGetResult("not_deployed", None)
+            return CortexGetResult(NOT_DEPLOYED_STATUS, None)
 
         else:
             raise ValueError(f"For api: {name} got unsupported Cortex output:\n{out}")
@@ -260,8 +316,9 @@ class CortexClient:
         return CortexGetResult(status, None)
 
     def get_all(self) -> List["CortexGetAllStatus"]:
-        out = _verbose_command_wrapper([CORTEX_PATH, "get", f"--env={self.cortex_env}"])
-        return cortex_parse_get_all(out)
+        out = _verbose_command_wrapper([CORTEX_PATH, "get", f"--env={self.cortex_env}", "-o=json"])
+        json_dict = json.loads(out.strip())
+        return [CortexGetAllStatus(e['spec']['name'], e['status']['status_code'] if e['spec']['kind'] == KIND_REALTIME_API else LIVE_STATUS) for e in json_dict]
 
     def delete(self, name, force=False, timeout_sec=CORTEX_DELETE_TIMEOUT_SEC, cursor=None) -> "CortexGetResult":
         """
@@ -278,7 +335,7 @@ class CortexClient:
             start_time = time.time()
             while True:
                 get_result = self.get(name)
-                if get_result.status == "not_deployed":
+                if get_result.status == NOT_DEPLOYED_STATUS:
                     return get_result
 
                 else:
@@ -365,7 +422,7 @@ class CortexClient:
                 )
                 for api_row in cur.fetchall():
                     api_name = api_row.api_name
-                    if self.get(api_name).status != "not_deployed":
+                    if self.get(api_name).status != NOT_DEPLOYED_STATUS:
                         logger.warning(f"Collecting Cortex garbage - timed-out deployed API: {api_name}")
                         self.delete(api_name, cursor=cur)
 

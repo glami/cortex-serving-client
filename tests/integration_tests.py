@@ -9,7 +9,8 @@ from unittest.mock import patch
 from requests import post
 import unittest
 
-from cortex_serving_client.cortex_client import get_cortex_client_instance
+from cortex_serving_client.cortex_client import get_cortex_client_instance, NOT_DEPLOYED_STATUS, JOB_STATUS_SUCCEEDED, \
+    KIND_BATCH_API
 from cortex_serving_client.deployment_failed import DeploymentFailed, DEPLOYMENT_TIMEOUT_FAIL_TYPE, \
     DEPLOYMENT_ERROR_FAIL_TYPE
 
@@ -23,7 +24,9 @@ class IntegrationTests(unittest.TestCase):
         pg_user='cortex_test',
         pg_password='cortex_test',
         pg_db='cortex_test',
-        cortex_env='local')
+        cortex_env='aws' # AWS is needed for BatchAPI testing
+    )
+
 
     def test_deploy_yes(self):
         deployment = dict(
@@ -48,7 +51,7 @@ class IntegrationTests(unittest.TestCase):
             self.cortex.delete(deployment['name'], force=True)
 
         self.assertTrue(result['yes'])
-        self.assertEqual(self.cortex.get(deployment['name']).status, 'not_deployed')
+        self.assertEqual(self.cortex.get(deployment['name']).status, NOT_DEPLOYED_STATUS)
 
     def test_deploy_fail(self):
         deployment = dict(
@@ -74,7 +77,7 @@ class IntegrationTests(unittest.TestCase):
         except DeploymentFailed as e:
             self.assertEqual(e.failure_type, DEPLOYMENT_ERROR_FAIL_TYPE)
 
-        self.assertEqual(self.cortex.get(deployment['name']).status, 'not_deployed')
+        self.assertEqual(self.cortex.get(deployment['name']).status, NOT_DEPLOYED_STATUS)
 
     def test_deploy_timeout_fail(self):
         deployment = dict(
@@ -102,9 +105,34 @@ class IntegrationTests(unittest.TestCase):
         except DeploymentFailed as e:
             self.assertEqual(e.failure_type, DEPLOYMENT_TIMEOUT_FAIL_TYPE)
 
-        self.assertEqual(self.cortex.get(deployment['name']).status, 'not_deployed')
+        self.assertEqual(self.cortex.get(deployment['name']).status, NOT_DEPLOYED_STATUS)
 
-
+    def test_deploy_job(self):
+        deployment = dict(
+            name='yes-job-api',
+            kind=KIND_BATCH_API,
+            predictor=dict(
+                type='python',
+                path='yes_predictor.py',
+            ),
+            compute=dict(
+                cpu=1,
+            )
+        )
+        job_spec = {
+            "workers": 1,
+            "item_list": {"items": [1, 2], "batch_size": 2},
+        }
+        job_result = self.cortex.deploy_batch_api_and_run_job(
+            deployment,
+            job_spec,
+            dir="./",
+            api_timeout_sec=10 * 60,
+            print_logs=True,
+        )
+        job_status = job_result['job_status']["status"]
+        assert job_status == JOB_STATUS_SUCCEEDED
+        self.assertEqual(self.cortex.get(deployment['name']).status, NOT_DEPLOYED_STATUS)
 
 
 

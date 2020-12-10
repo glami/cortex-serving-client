@@ -3,7 +3,7 @@ import textwrap
 import unittest
 
 from cortex_serving_client.cortex_client import cortex_parse_get_all, CortexGetAllStatus, CortexClient, \
-    _verbose_command_wrapper
+    _verbose_command_wrapper, NOT_DEPLOYED_STATUS
 
 
 class CortexClientTest(unittest.TestCase):
@@ -65,9 +65,9 @@ class CortexClientTest(unittest.TestCase):
             print(f'{e} with stdout: "{e.output}" and stderr: "{e.stderr}"')
 
     def test_not_deployed(self):
-        _verbose_command_wrapper(['cat', 'not_deployed'], allow_non_0_return_code_on_stdout_sub_strs=['not_deployed'], timeout=1, sleep_base_retry_sec=0.1)
+        _verbose_command_wrapper(['cat', NOT_DEPLOYED_STATUS], allow_non_0_return_code_on_stdout_sub_strs=[NOT_DEPLOYED_STATUS], timeout=1, sleep_base_retry_sec=0.1)
         try:
-            _verbose_command_wrapper(['cat', 'not_deployed'], timeout=1, sleep_base_retry_sec=0.1)
+            _verbose_command_wrapper(['cat', NOT_DEPLOYED_STATUS], timeout=1, sleep_base_retry_sec=0.1)
             self.fail()
 
         except ValueError as e:
