@@ -27,7 +27,6 @@ class IntegrationTests(unittest.TestCase):
         cortex_env='aws' # AWS is needed for BatchAPI testing
     )
 
-
     def test_deploy_yes(self):
         deployment = dict(
             name='yes-api',

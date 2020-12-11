@@ -140,7 +140,7 @@ class CortexClient:
                     self._insert_or_update_gc_timeout(name, gc_timeout_sec)
                     _verbose_command_wrapper([CORTEX_PATH, "deploy", filename, f"--env={self.cortex_env}", "--yes"], cwd=dir)
 
-                if print_logs:
+                if print_logs and deployment['kind'] == KIND_REALTIME_API:
                     self._cortex_logs_print_async(name)
 
                 start_time = time.time()
@@ -251,6 +251,9 @@ class CortexClient:
             s.mount('https://', http_adapter)
             job_json = s.post(get_result.endpoint, json=job_spec, timeout=10 * 60).json()
             job_id = job_json['job_id']
+            if print_logs:
+                self._cortex_logs_print_async(deployment['name'], job_id)
+
             job_status = JOB_STATUS_ENQUEUING
             while job_status in (JOB_STATUS_ENQUEUING, JOB_STATUS_RUNNING):
                 job_json = json.loads(_verbose_command_wrapper([CORTEX_PATH, "get", deployment["name"], job_id, "--env", self.cortex_env, "-o", "json"]).strip())
@@ -356,16 +359,22 @@ class CortexClient:
         finally:
             self._open_cursor_if_none(cursor, self._del_db_api_row, name)
 
-    def _cortex_logs_print_async(self, name):
-        def listen_on_logs():
-            with subprocess.Popen([CORTEX_PATH, "logs", name, f"--env={self.cortex_env}"], stdout=subprocess.PIPE) as logs_sp:
+    def _cortex_logs_print_async(self, name, job_id=None):
+        def listen_on_logs(cmd_arr):
+            with subprocess.Popen(cmd_arr, stdout=subprocess.PIPE) as logs_sp:
                 with io.TextIOWrapper(logs_sp.stdout, encoding="utf-8") as logs_out:
                     for line in logs_out:
                         print_line = remove_non_printable(line.rstrip('\n'))
                         if len(print_line) > 0:
                             logger.info(print_line)
 
-        worker = Thread(target=listen_on_logs, daemon=True, name=f'api_{name}')
+        if job_id is None:
+            cmd_arr = [CORTEX_PATH, "logs", name, f"--env={self.cortex_env}"]
+
+        else:
+            cmd_arr = [CORTEX_PATH, "logs", name, job_id, f"--env={self.cortex_env}"]
+
+        worker = Thread(target=listen_on_logs, args=(cmd_arr,), daemon=True, name=f'api_{name}')
         worker.start()
 
     @staticmethod
