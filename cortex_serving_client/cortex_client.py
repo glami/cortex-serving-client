@@ -249,8 +249,20 @@ class CortexClient:
             http_adapter = HTTPAdapter(max_retries=Retry(total=5, backoff_factor=3))
             s.mount('http://', http_adapter)
             s.mount('https://', http_adapter)
-            job_json = s.post(get_result.endpoint, json=job_spec, timeout=10 * 60).json()
-            job_id = job_json['job_id']
+            job_id = None
+            for retry in range(n_retries):
+                job_json = s.post(get_result.endpoint, json=job_spec, timeout=10 * 60).json()
+                if 'job_id' in job_json:
+                    job_id = job_json['job_id']
+                    break
+
+                else:
+                    time.sleep(3 * 2**retry)
+                    continue
+
+            if job_id is None:
+                raise ValueError(f'job_id not in job_json {json.dumps(job_json)}')
+
             if print_logs:
                 self._cortex_logs_print_async(deployment['name'], job_id)
 
@@ -258,6 +270,7 @@ class CortexClient:
             while job_status in (JOB_STATUS_ENQUEUING, JOB_STATUS_RUNNING):
                 job_json = json.loads(_verbose_command_wrapper([CORTEX_PATH, "get", deployment["name"], job_id, "--env", self.cortex_env, "-o", "json"]).strip())
                 job_status = job_json['job_status']["status"]
+                time.sleep(30)
 
             logger.info(f'BatchAPI {deployment["name"]} job {job_id} ended with status {job_status}. Deleting the BatchAPI.')
             return job_json
