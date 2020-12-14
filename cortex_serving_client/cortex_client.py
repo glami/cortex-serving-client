@@ -341,7 +341,7 @@ class CortexClient:
         Executes delete and checks that the API was deleted. If not tries force delete. If that fails, raises exception.
         """
 
-        delete_cmd = [CORTEX_PATH, "delete", name, f"--env={self.cortex_env}"]
+        delete_cmd = [CORTEX_PATH, "delete", name, f"--env={self.cortex_env}", "-o=json"]
         if force:
             delete_cmd.append("-f")
 
