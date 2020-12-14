@@ -138,7 +138,7 @@ class CortexClient:
                     gc_timeout_sec = deployment_timeout_sec + CORTEX_DELETE_TIMEOUT_SEC
                     logger.info(f"Deployment {name} has deployment timeout {deployment_timeout_sec}sec and GC timeout {gc_timeout_sec}sec.")
                     self._insert_or_update_gc_timeout(name, gc_timeout_sec)
-                    _verbose_command_wrapper([CORTEX_PATH, "deploy", filename, f"--env={self.cortex_env}", "--yes"], cwd=dir)
+                    _verbose_command_wrapper([CORTEX_PATH, "deploy", filename, f"--env={self.cortex_env}", "--yes", "-o=json"], cwd=dir)
 
                 if print_logs and deployment['kind'] == KIND_REALTIME_API:
                     self._cortex_logs_print_async(name)
@@ -268,7 +268,7 @@ class CortexClient:
 
             job_status = JOB_STATUS_ENQUEUING
             while job_status in (JOB_STATUS_ENQUEUING, JOB_STATUS_RUNNING):
-                job_json = json.loads(_verbose_command_wrapper([CORTEX_PATH, "get", deployment["name"], job_id, "--env", self.cortex_env, "-o", "json"]).strip())
+                job_json = json.loads(_verbose_command_wrapper([CORTEX_PATH, "get", deployment["name"], job_id, "--env", self.cortex_env, "-o=json"]).strip())
                 job_status = job_json['job_status']["status"]
                 time.sleep(30)
 
@@ -285,11 +285,10 @@ class CortexClient:
 
     def raise_on_cluster_down(self):
         try:
-            input_in_case_endpoint_prompt = b"n\n"
-            _verbose_command_wrapper([CORTEX_PATH, "get", f"--env={self.cortex_env}"], input=input_in_case_endpoint_prompt)
+            self.get_all()
 
-        except ValueError as e:
-            raise ValueError("Cluster is likely down! Check the exception text") from e
+        except (ValueError, JSONDecodeError) as e:
+            raise ValueError(f"Cluster is likely down: {e}.") from e
 
     def get(self, name) -> "CortexGetResult":
         out = _verbose_command_wrapper([CORTEX_PATH, "get", name, f"--env={self.cortex_env}", "-o=json"], allow_non_0_return_code_on_stdout_sub_strs=[NOT_DEPLOYED])
@@ -332,7 +331,8 @@ class CortexClient:
         return CortexGetResult(status, None)
 
     def get_all(self) -> List["CortexGetAllStatus"]:
-        out = _verbose_command_wrapper([CORTEX_PATH, "get", f"--env={self.cortex_env}", "-o=json"])
+        input_in_case_endpoint_prompt = b"n\n"
+        out = _verbose_command_wrapper([CORTEX_PATH, "get", f"--env={self.cortex_env}", "-o=json"], input=input_in_case_endpoint_prompt)
         json_dict = json.loads(out.strip())
         return [CortexGetAllStatus(e['spec']['name'], e['status']['status_code'] if e['spec']['kind'] == KIND_REALTIME_API else LIVE_STATUS) for e in json_dict]
 
