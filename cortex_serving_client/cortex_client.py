@@ -356,7 +356,7 @@ class CortexClient:
 
                 else:
                     _verbose_command_wrapper(delete_cmd, input=accept_deletion_if_asked_input,
-                                             allow_non_0_return_code_on_stdout_sub_strs=['not deployed'])
+                                             allow_non_0_return_code_on_stdout_sub_strs=[NOT_DEPLOYED])
 
                 if start_time + timeout_sec < time.time():
                     if force:
