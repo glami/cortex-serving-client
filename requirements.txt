@@ -1,3 +1,3 @@
 PyYAML>=3.12
 psycopg2-binary==2.8.4
-cortex==0.24.0
+cortex==0.24.1
