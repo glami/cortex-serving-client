@@ -19,6 +19,6 @@ fi;
 git tag "${tag}" || true;
 git push --tags;
 
-rm -r dist/ build/ cortex_serving_client.egg-info/;
+rm -r dist/ build/ cortex_serving_client.egg-info/ || true;
 python3 setup.py sdist bdist_wheel;
 python3 -m twine upload dist/* --username __token__;
