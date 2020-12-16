@@ -129,8 +129,7 @@ class IntegrationTests(unittest.TestCase):
             api_timeout_sec=10 * 60,
             print_logs=True,
         )
-        job_status = job_result['job_status']["status"]
-        assert job_status == JOB_STATUS_SUCCEEDED
+        assert job_result.status == JOB_STATUS_SUCCEEDED
         self.assertEqual(self.cortex.get(deployment['name']).status, NOT_DEPLOYED_STATUS)
 
 

@@ -3,7 +3,6 @@ import io
 import json
 import logging
 import os
-import re
 import subprocess
 import time
 from contextlib import contextmanager
@@ -24,7 +23,7 @@ from requests.adapters import HTTPAdapter, Retry
 
 from cortex_serving_client.command_line_wrapper import _verbose_command_wrapper
 from cortex_serving_client.deployment_failed import DeploymentFailed, COMPUTE_UNAVAILABLE_FAIL_TYPE, \
-    DEPLOYMENT_TIMEOUT_FAIL_TYPE, DEPLOYMENT_ERROR_FAIL_TYPE
+    DEPLOYMENT_TIMEOUT_FAIL_TYPE, DEPLOYMENT_ERROR_FAIL_TYPE, DEPLOYMENT_JOB_NOT_DEPLOYED_FAIL_TYPE
 from cortex_serving_client.printable_chars import remove_non_printable
 
 
@@ -169,7 +168,7 @@ class CortexClient:
                         raise DeploymentFailed(f"Deployment of {name} timed out after {deployment_timeout_sec} secs.",
                                                DEPLOYMENT_TIMEOUT_FAIL_TYPE, name, time_since_start)
 
-                    logger.info(f"Sleeping during deployment of {name} until next status check. Current get_result: {get_result}.")
+                    logger.info(f"Sleeping during deployment of {name} until next status check. Current status: {get_result.status}.")
                     time.sleep(CORTEX_STATUS_CHECK_SLEEP_SEC)
 
             except DeploymentFailed as e:
@@ -234,7 +233,7 @@ class CortexClient:
                                      deployment_timeout_sec=CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT,
                                      api_timeout_sec=CORTEX_DEFAULT_API_TIMEOUT,
                                      print_logs=False,
-                                     n_retries=0):
+                                     n_retries=0) -> "CortexGetResult":
 
         with self.deploy_temporarily(
                 deployment,
@@ -244,13 +243,14 @@ class CortexClient:
                 print_logs=print_logs,
                 n_retries=n_retries
         ) as get_result:
+
             logger.info(f'BatchAPI {deployment["name"]} deployed. Starting a job.')
             s = requests.Session()
             http_adapter = HTTPAdapter(max_retries=Retry(total=5, backoff_factor=3))
             s.mount('http://', http_adapter)
             s.mount('https://', http_adapter)
             job_id = None
-            for retry in range(n_retries):
+            for retry in range(3):
                 job_json = s.post(get_result.endpoint, json=job_spec, timeout=10 * 60).json()
                 if 'job_id' in job_json:
                     job_id = job_json['job_id']
@@ -266,14 +266,20 @@ class CortexClient:
             if print_logs:
                 self._cortex_logs_print_async(deployment['name'], job_id)
 
+            time.sleep(30)  # Don't call too early: https://gitter.im/cortexlabs/cortex?at=5f7fe4c01cbba72b63cb745f
+
             job_status = JOB_STATUS_ENQUEUING
             while job_status in (JOB_STATUS_ENQUEUING, JOB_STATUS_RUNNING):
-                job_json = json.loads(_verbose_command_wrapper([CORTEX_PATH, "get", deployment["name"], job_id, "--env", self.cortex_env, "-o=json"]).strip())
-                job_status = job_json['job_status']["status"]
+                job_result = self.get(deployment["name"], job_id)
+                job_status = job_result.status
                 time.sleep(30)
 
+            if job_status == NOT_DEPLOYED_STATUS:
+                # TODO Better retry mechanism could be used https://gitter.im/cortexlabs/cortex?at=5f7fe4c01cbba72b63cb745f
+                raise DeploymentFailed('Job unexpectedly undeployed.', DEPLOYMENT_JOB_NOT_DEPLOYED_FAIL_TYPE, deployment['name'], -1)
+
             logger.info(f'BatchAPI {deployment["name"]} job {job_id} ended with status {job_status}. Deleting the BatchAPI.')
-            return job_json
+            return job_result
 
     def postpone_api_timeout(self, name: str, timeout_timestamp: datetime):
         ultimate_timeout = timeout_timestamp + timedelta(seconds=CORTEX_DELETE_TIMEOUT_SEC)
@@ -290,8 +296,10 @@ class CortexClient:
         except (ValueError, JSONDecodeError) as e:
             raise ValueError(f"Cluster is likely down: {e}.") from e
 
-    def get(self, name) -> "CortexGetResult":
-        out = _verbose_command_wrapper([CORTEX_PATH, "get", name, f"--env={self.cortex_env}", "-o=json"], allow_non_0_return_code_on_stdout_sub_strs=[NOT_DEPLOYED])
+    def get(self, name, job_id=None) -> "CortexGetResult":
+        job_id_or_empty = [job_id] if job_id is not None else []
+        cmd = [CORTEX_PATH, "get", name] + job_id_or_empty + [f"--env={self.cortex_env}", "-o=json"]
+        out = _verbose_command_wrapper(cmd, allow_non_0_return_code_on_stdout_sub_strs=[NOT_DEPLOYED])
         try:
             json_dict = json.loads(out.strip())
 
@@ -302,39 +310,29 @@ class CortexClient:
         lines = out.splitlines()
         first_line = lines[0] if len(lines) > 0 else ''
         if json_dict is not None:
-            json_dict = json_dict[0]
-            if json_dict['spec']['kind'] == KIND_BATCH_API:
-                return CortexGetResult(LIVE_STATUS, json_dict['endpoint'])
+            if job_id is not None:
+                job_status = json_dict['job_status']["status"]
+                return CortexGetResult(job_status, None, json_dict)
+
+            first_json_dict = json_dict[0]
+            if first_json_dict['spec']['kind'] == KIND_BATCH_API:
+                # BatchAPI has no status
+                return CortexGetResult(LIVE_STATUS, first_json_dict['endpoint'], first_json_dict)
 
             else:
-                return CortexGetResult(json_dict['status']['status_code'], json_dict['endpoint'])
+                return CortexGetResult(first_json_dict['status']['status_code'], first_json_dict['endpoint'], first_json_dict)
 
         elif NOT_DEPLOYED in first_line:
-            return CortexGetResult(NOT_DEPLOYED_STATUS, None)
+            return CortexGetResult(NOT_DEPLOYED_STATUS, None, dict())
 
         else:
-            raise ValueError(f"For api: {name} got unsupported Cortex output:\n{out}")
-
-    @staticmethod
-    def _parse_get_deployed(cmd_out: str):
-        lines = cmd_out.splitlines()
-        status = lines[2].split("  ")[0].strip()
-        if status == LIVE_STATUS:
-            for line in lines:
-                line_split = line.split(" ")
-                if line_split[0] == "endpoint:":
-                    url = line_split[1]
-                    return CortexGetResult(status, url)
-
-            raise ValueError(f"Unsupported Cortex output:\n{cmd_out}")
-
-        return CortexGetResult(status, None)
+            raise ValueError(f"For api {name} with job_id {job_id} got unsupported Cortex output:\n{out}")
 
     def get_all(self) -> List["CortexGetAllStatus"]:
         input_in_case_endpoint_prompt = b"n\n"
         out = _verbose_command_wrapper([CORTEX_PATH, "get", f"--env={self.cortex_env}", "-o=json"], input=input_in_case_endpoint_prompt)
         json_dict = json.loads(out.strip())
-        return [CortexGetAllStatus(e['spec']['name'], e['status']['status_code'] if e['spec']['kind'] == KIND_REALTIME_API else LIVE_STATUS) for e in json_dict]
+        return [CortexGetAllStatus(e['spec']['name'], e['status']['status_code'] if e['spec']['kind'] == KIND_REALTIME_API else LIVE_STATUS, e) for e in json_dict]
 
     def delete(self, name, force=False, timeout_sec=CORTEX_DELETE_TIMEOUT_SEC, cursor=None) -> "CortexGetResult":
         """
@@ -366,7 +364,7 @@ class CortexClient:
                         logger.error(f'Timeout of delete cmd {delete_cmd} after {timeout_sec} seconds. Will attempt to force delete now.')
                         return self.delete(name, force=True, timeout_sec=timeout_sec, cursor=cursor)
 
-                logger.info(f"During delete of {name} sleeping until next status check. Current get_result: {get_result}.")
+                logger.info(f"During delete of {name} sleeping until next status check. Current result: {get_result.status}.")
                 time.sleep(CORTEX_STATUS_CHECK_SLEEP_SEC)
 
         finally:
@@ -528,30 +526,13 @@ def open_pg_cursor(db_connection_pool, key=None):
 class CortexGetAllStatus(NamedTuple):
     api: str
     status: str
-
-
-def cortex_parse_get_all(out: str) -> List[CortexGetAllStatus]:
-    if "no apis are deployed" in out:
-        return []
-
-    lines = out.splitlines()
-
-    header_split = re.split(r"\s+", lines[1])
-    if header_split[0] == "api" and header_split[1] == "status":
-        result = []
-        for row_line in lines[2:]:
-            row = re.split(r"\s{2,}", row_line)
-            result.append(CortexGetAllStatus(row[0].strip(), row[1].strip()))
-
-        return result
-
-    else:
-        raise ValueError(f"Cannot parse output:\n{out}")
+    response: dict
 
 
 class CortexGetResult(NamedTuple):
     status: str
     endpoint: Optional[str]
+    response: dict
 
 
 def file_to_str(path: str) -> str:

@@ -1,28 +1,11 @@
 import subprocess
 import unittest
 
-from cortex_serving_client.cortex_client import cortex_parse_get_all, CortexGetAllStatus, _verbose_command_wrapper, \
+from cortex_serving_client.cortex_client import _verbose_command_wrapper, \
     NOT_DEPLOYED_STATUS
 
 
 class CortexClientTest(unittest.TestCase):
-    def test_get_all_parsing(self):
-        out = "\nno apis are deployed\n"
-        self.assertEqual(cortex_parse_get_all(out), [])
-
-        out = (
-            "\n"
-            "api              status     up-to-date   requested   last update   avg request   2XX  \n"
-            "cat-trainer-27   updating   0            1           21s  \n"
-        )
-        self.assertEqual(cortex_parse_get_all(out), [CortexGetAllStatus("cat-trainer-27", "updating")])
-
-        out = (
-            "\n"
-            "api              status                 up-to-date   requested   last update   avg request   2XX  \n"
-            "cat-trainer-27   error (out of memory)  0            1           21s  \n"
-        )
-        self.assertEqual(cortex_parse_get_all(out), [CortexGetAllStatus("cat-trainer-27", "error (out of memory)")])
 
     def test_subprocess_timeout(self):
         try:
