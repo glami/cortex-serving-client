@@ -9,7 +9,7 @@ It is a Python wrapper around [Cortex's command-line client](https://cortex.dev)
 - Prevent accidental charges by auto-removing deployments that exceeded a timeout.
 - Execute operations: deploy, delete, get, get all.
 - Stream remote logs into the local log with thread name set to the API name.
-- Supported Cortex Version: 0.23
+- Supported Cortex Version: 0.24 (See requirements.txt)
 
 Here is [a video about the package](https://youtu.be/aU95dBAspr0?t=510).
 
@@ -87,7 +87,17 @@ sudo su postgres;
 psql postgres postgres;
 create database cortex_test;
 create role cortex_test login password 'cortex_test';
-grant all privileges on database cortext_test to cortex_test;
+grant all privileges on database cortex_test to cortex_test;
+```
+
+You may need to configure also 
+```bash
+
+vi /etc/postgresql/11/main/pg_hba.conf
+# change a matching line into following to allow localhost network access
+# host    all             all             127.0.0.1/32            trust
+
+sudo systemctl restart postgresql;
 ```
 
 ### Install Cortex
