@@ -47,6 +47,7 @@ NOT_DEPLOYED_STATUS = "status_not_deployed"
 JOB_STATUS_SUCCEEDED = 'status_succeeded'
 JOB_STATUS_ENQUEUING = 'status_enqueuing'
 JOB_STATUS_RUNNING = 'status_running'
+JOB_STATUS_UNEXPECTED_ERROR = 'status_unexpected_error'
 
 
 CORTEX_DELETE_TIMEOUT_SEC = 10 * 60
@@ -257,16 +258,18 @@ class CortexClient:
                     break
 
                 else:
-                    time.sleep(3 * 2**retry)
+                    sleep_time = 3 * 2 ** retry
+                    logger.info(f'Retrying job creation request after {sleep_time}.')
+                    time.sleep(sleep_time)
                     continue
 
             if job_id is None:
                 raise ValueError(f'job_id not in job_json {json.dumps(job_json)}')
 
+            time.sleep(60)  # Don't call job too early: https://gitter.im/cortexlabs/cortex?at=5f7fe4c01cbba72b63cb745f
+
             if print_logs:
                 self._cortex_logs_print_async(deployment['name'], job_id)
-
-            time.sleep(30)  # Don't call too early: https://gitter.im/cortexlabs/cortex?at=5f7fe4c01cbba72b63cb745f
 
             job_status = JOB_STATUS_ENQUEUING
             while job_status in (JOB_STATUS_ENQUEUING, JOB_STATUS_RUNNING):
@@ -274,9 +277,9 @@ class CortexClient:
                 job_status = job_result.status
                 time.sleep(30)
 
-            if job_status == NOT_DEPLOYED_STATUS:
+            if job_status in (NOT_DEPLOYED_STATUS, JOB_STATUS_UNEXPECTED_ERROR):
                 # TODO Better retry mechanism could be used https://gitter.im/cortexlabs/cortex?at=5f7fe4c01cbba72b63cb745f
-                raise DeploymentFailed('Job unexpectedly undeployed.', DEPLOYMENT_JOB_NOT_DEPLOYED_FAIL_TYPE, deployment['name'], -1)
+                raise DeploymentFailed('Job unexpectedly undeployed or failed.', DEPLOYMENT_JOB_NOT_DEPLOYED_FAIL_TYPE, deployment['name'], -1)
 
             logger.info(f'BatchAPI {deployment["name"]} job {job_id} ended with status {job_status}. Deleting the BatchAPI.')
             return job_result
