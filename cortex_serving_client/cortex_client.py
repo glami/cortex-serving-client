@@ -58,6 +58,7 @@ CORTEX_MIN_API_TIMEOUT_SEC = CORTEX_DELETE_TIMEOUT_SEC
 CORTEX_DEPLOY_RETRY_BASE_SLEEP_SEC = 5 * 60
 CORTEX_STATUS_CHECK_SLEEP_SEC = 10
 INFINITE_TIMEOUT_SEC = 30 * 365 * 24 * 60 * 60  # 30 years
+WAIT_BEFORE_JOB_GET = int(os.environ.get('CORTEX_WAIT_BEFORE_JOB_GET', str(90)))
 
 CORTEX_PATH = get_cli_path()
 
@@ -251,38 +252,45 @@ class CortexClient:
             s.mount('http://', http_adapter)
             s.mount('https://', http_adapter)
             job_id = None
-            for retry in range(3):
-                job_json = s.post(get_result.endpoint, json=job_spec, timeout=10 * 60).json()
-                if 'job_id' in job_json:
-                    job_id = job_json['job_id']
-                    break
+            for retry_job_get in range(5):
+                for retry_job_submit in range(3):
+                    job_json = s.post(get_result.endpoint, json=job_spec, timeout=10 * 60).json()
+                    if 'job_id' in job_json:
+                        job_id = job_json['job_id']
+                        break
 
-                else:
-                    sleep_time = 3 * 2 ** retry
-                    logger.info(f'Retrying job creation request after {sleep_time}.')
-                    time.sleep(sleep_time)
+                    else:
+                        sleep_time = 3 * 2 ** retry_job_submit
+                        logger.info(f'Retrying job creation request after {sleep_time}.')
+                        time.sleep(sleep_time)
+                        continue
+
+                if job_id is None:
+                    raise ValueError(f'job_id not in job_json {json.dumps(job_json)}')
+
+                time.sleep(WAIT_BEFORE_JOB_GET * 2 ** retry_job_get)  # Don't call job too early: https://gitter.im/cortexlabs/cortex?at=5f7fe4c01cbba72b63cb745f
+
+                if print_logs:
+                    self._cortex_logs_print_async(deployment['name'], job_id)
+
+                job_status = JOB_STATUS_ENQUEUING
+                while job_status in (JOB_STATUS_ENQUEUING, JOB_STATUS_RUNNING):
+                    job_result = self.get(deployment["name"], job_id)
+                    job_status = job_result.status
+                    time.sleep(30)
+
+                if job_status in (NOT_DEPLOYED_STATUS, JOB_STATUS_UNEXPECTED_ERROR):
+                    # TODO Better retry mechanism could be used https://gitter.im/cortexlabs/cortex?at=5f7fe4c01cbba72b63cb745f
+                    # Sleep in after job submission.
+                    logger.warning(f'Job unexpectedly undeployed or failed with status {job_status}. Retrying with sleep.')
                     continue
 
-            if job_id is None:
-                raise ValueError(f'job_id not in job_json {json.dumps(job_json)}')
+                else:
+                    logger.info(f'BatchAPI {deployment["name"]} job {job_id} ended with status {job_status}. Deleting the BatchAPI.')
+                    return job_result
 
-            time.sleep(60)  # Don't call job too early: https://gitter.im/cortexlabs/cortex?at=5f7fe4c01cbba72b63cb745f
-
-            if print_logs:
-                self._cortex_logs_print_async(deployment['name'], job_id)
-
-            job_status = JOB_STATUS_ENQUEUING
-            while job_status in (JOB_STATUS_ENQUEUING, JOB_STATUS_RUNNING):
-                job_result = self.get(deployment["name"], job_id)
-                job_status = job_result.status
-                time.sleep(30)
-
-            if job_status in (NOT_DEPLOYED_STATUS, JOB_STATUS_UNEXPECTED_ERROR):
-                # TODO Better retry mechanism could be used https://gitter.im/cortexlabs/cortex?at=5f7fe4c01cbba72b63cb745f
-                raise DeploymentFailed('Job unexpectedly undeployed or failed.', DEPLOYMENT_JOB_NOT_DEPLOYED_FAIL_TYPE, deployment['name'], -1)
-
-            logger.info(f'BatchAPI {deployment["name"]} job {job_id} ended with status {job_status}. Deleting the BatchAPI.')
-            return job_result
+            raise DeploymentFailed(f'Job unexpectedly undeployed or failed with status {job_status}.', DEPLOYMENT_JOB_NOT_DEPLOYED_FAIL_TYPE,
+                                   deployment['name'], -1)
 
     def postpone_api_timeout(self, name: str, timeout_timestamp: datetime):
         ultimate_timeout = timeout_timestamp + timedelta(seconds=CORTEX_DELETE_TIMEOUT_SEC)
