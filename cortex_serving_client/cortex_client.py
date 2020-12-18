@@ -48,6 +48,7 @@ JOB_STATUS_SUCCEEDED = 'status_succeeded'
 JOB_STATUS_ENQUEUING = 'status_enqueuing'
 JOB_STATUS_RUNNING = 'status_running'
 JOB_STATUS_UNEXPECTED_ERROR = 'status_unexpected_error'
+JOB_STATUS_ENQUEUED_FAILED = 'status_enqueue_failed'
 
 
 CORTEX_DELETE_TIMEOUT_SEC = 10 * 60
@@ -279,8 +280,8 @@ class CortexClient:
                     job_status = job_result.status
                     time.sleep(30)
 
-                if job_status in (NOT_DEPLOYED_STATUS, JOB_STATUS_UNEXPECTED_ERROR):
-                    # TODO Better retry mechanism could be used https://gitter.im/cortexlabs/cortex?at=5f7fe4c01cbba72b63cb745f
+                if job_status in (NOT_DEPLOYED_STATUS, JOB_STATUS_UNEXPECTED_ERROR, JOB_STATUS_ENQUEUED_FAILED):
+                    # TODO request fixes improvements https://gitter.im/cortexlabs/cortex?at=5f7fe4c01cbba72b63cb745f
                     # Sleep in after job submission.
                     logger.warning(f'Job unexpectedly undeployed or failed with status {job_status}. Retrying with sleep.')
                     continue
