@@ -4,12 +4,13 @@
 
 Cortex Serving Client makes Python serving automation simple.
 It is a Python wrapper around [Cortex's command-line client](https://cortex.dev) that provides garbage API collection. 
+Cortex has [official Python client now](https://pypi.org/project/cortex/) ([source](https://github.com/cortexlabs/cortex/blob/e22985f8516fe8db930aaecd05269da99d5e7a93/pkg/cortex/client/cortex/client.py)), but this project offers advanced features (GC, temporary deployment, timeouts) not present in the vanilla.
 
 - Automate your Cortex AWS cluster from Python.
 - Prevent accidental charges by auto-removing deployments that exceeded a timeout.
 - Execute operations: deploy, delete, get, get all.
 - Stream remote logs into the local log with thread name set to the API name.
-- Supported Cortex Version: 0.24 (See requirements.txt)
+- Supported Cortex Version: 0.25 (See requirements.txt)
 
 Here is [a video about the package](https://youtu.be/aU95dBAspr0?t=510).
 
