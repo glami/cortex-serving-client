@@ -57,7 +57,7 @@ CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT = 20 * 60
 CORTEX_DEFAULT_API_TIMEOUT = CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT
 CORTEX_MIN_API_TIMEOUT_SEC = CORTEX_DELETE_TIMEOUT_SEC
 CORTEX_DEPLOY_RETRY_BASE_SLEEP_SEC = 5 * 60
-CORTEX_STATUS_CHECK_SLEEP_SEC = 10
+CORTEX_STATUS_CHECK_SLEEP_SEC = 15
 INFINITE_TIMEOUT_SEC = 30 * 365 * 24 * 60 * 60  # 30 years
 WAIT_BEFORE_JOB_GET = int(os.environ.get('CORTEX_WAIT_BEFORE_JOB_GET', str(30)))
 
@@ -255,8 +255,14 @@ class CortexClient:
             job_id = None
             for retry_job_get in range(5):
                 for retry_job_submit in range(3):
-                    job_json = s.post(get_result.endpoint, json=job_spec, timeout=10 * 60).json()
-                    if 'job_id' in job_json:
+                    try:
+                        job_json = s.post(get_result.endpoint, json=job_spec, timeout=10 * 60).json()
+
+                    except JSONDecodeError as e:
+                        logger.warning(f'Job submission response could not be decoded: {e}.')
+                        job_json = None
+
+                    if job_json is not None and 'job_id' in job_json:
                         job_id = job_json['job_id']
                         break
 
