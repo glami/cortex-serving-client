@@ -6,7 +6,7 @@ from math import ceil
 from typing import List
 
 CORTEX_DEFAULT_COMMAND_SYSTEM_PROCESS_TIMEOUT = 3 * 60
-CORTEX_CMD_BASE_RETRY_SEC = 5
+CORTEX_CMD_BASE_RETRY_SEC = 10
 
 
 logger = logging.getLogger(__name__)
