@@ -1,8 +1,17 @@
+# Basic logging config
+import logging
+
+import requests
+
+logging.basicConfig(
+    format="%(asctime)s : %(levelname)s : %(threadName)-10s : %(name)s : %(message)s", level=logging.DEBUG,
+)
+
 import subprocess
 import unittest
-
 from cortex_serving_client.cortex_client import _verbose_command_wrapper, \
     NOT_DEPLOYED_STATUS
+from cortex_serving_client.retry_utils import create_always_retry_session
 
 
 class CortexClientTest(unittest.TestCase):
@@ -23,3 +32,9 @@ class CortexClientTest(unittest.TestCase):
 
         except ValueError as e:
             pass
+
+    def test_request_retry(self):
+        with self.assertRaises(requests.exceptions.ConnectionError):
+            with create_always_retry_session(backoff_sec=0) as session:
+                # this does not simulate problematic scenario of whitelist methods and read-error urllib3.util.retry.Retry.increment
+                session.post("http://127.0.0.1:33333")

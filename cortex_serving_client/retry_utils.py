@@ -5,6 +5,9 @@ import logging
 
 import inspect
 
+import requests
+from requests.adapters import HTTPAdapter, Retry
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,3 +31,11 @@ def retry_on_exception(
                 sleep(sleep_secs)
 
     raise RuntimeError(f"Too many retries ({max_retries}). Last exception: {ex}.") from ex
+
+
+def create_always_retry_session(backoff_sec=3):
+    s = requests.Session()
+    http_adapter = HTTPAdapter(max_retries=Retry(total=5, backoff_factor=backoff_sec, method_whitelist=False))
+    s.mount('http://', http_adapter)
+    s.mount('https://', http_adapter)
+    return s
