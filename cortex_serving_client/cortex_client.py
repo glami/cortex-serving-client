@@ -27,12 +27,14 @@ from cortex_serving_client.retry_utils import create_always_retry_session
 
 KIND_REALTIME_API = 'RealtimeAPI'
 KIND_BATCH_API = 'BatchAPI'
+KIND_ASYNC_API = 'AsyncAPI'
+KIND_TASK_API = 'TaskAPI'
 KIND_DEFAULT = KIND_REALTIME_API
 
 NOT_DEPLOYED = "not deployed"
 
 """
-Source: https://github.com/cortexlabs/cortex/blob/0.23/pkg/types/status/code.go
+Source: https://github.com/cortexlabs/cortex/blob/0.31/pkg/types/status/code.go
 On some places custom "not_deployed" status may be used.
 """
 

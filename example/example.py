@@ -20,6 +20,7 @@ cortex = get_cortex_client_instance(
 # Deployment config
 deployment = dict(
     name='dummy-api',
+    kind='RealtimeAPI',
     predictor=dict(
         type='python',
         path='dummy_predictor.py',
