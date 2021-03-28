@@ -3,14 +3,14 @@
 <img src="https://raw.githubusercontent.com/glami/cortex-serving-client/master/cortex-serving-client-logo-2.svg" alt="Cortex Serving Client" style="max-width: 200px">
 
 Cortex Serving Client makes Python serving automation simple.
-It is a Python wrapper around [Cortex's command-line client](https://cortex.dev) that provides garbage API collection. 
+It is a Python wrapper around [Cortex's command-line client](https://cortex.dev) that provides garbage API collection.
 Cortex has [official Python client now](https://pypi.org/project/cortex/) ([source](https://github.com/cortexlabs/cortex/blob/e22985f8516fe8db930aaecd05269da99d5e7a93/pkg/cortex/client/cortex/client.py)), but this project offers advanced features (GC, temporary deployment, timeouts) not present in the vanilla.
 
 - Automate your Cortex AWS cluster from Python.
 - Prevent accidental charges by auto-removing deployments that exceeded a timeout.
 - Execute operations: deploy, delete, get, get all.
 - Stream remote logs into the local log with thread name set to the API name.
-- Supported Cortex Version: 0.25 (See requirements.txt)
+- Supported Cortex Version: 0.31.1 (See requirements.txt)
 
 Here is [a video about the package](https://youtu.be/aU95dBAspr0?t=510).
 
@@ -81,7 +81,7 @@ This tutorial will help you to get [the basic example](/example/example.py) runn
 ### Setup Database
 Follow below instuctions to configure local database,
 or configure cluster database,
-and re-configure db in [the example script](/example/example.py). 
+and re-configure db in [the example script](/example/example.py).
 
 ```bash
 sudo su postgres;
@@ -91,7 +91,7 @@ create role cortex_test login password 'cortex_test';
 grant all privileges on database cortex_test to cortex_test;
 ```
 
-You may need to configure also 
+You may need to configure also
 ```bash
 
 vi /etc/postgresql/11/main/pg_hba.conf
@@ -111,7 +111,7 @@ You may be required to add your user into docker group and then re-login.
 ### Deploy Your First Model
 
 The deployment and prediction example resides in [the example script](/example/example.py).
-Make sure you have created a virtual environment, and installed requirements in `requirements.txt` and `requirements-dev.txt`, 
+Make sure you have created a virtual environment, and installed requirements in `requirements.txt` and `requirements-dev.txt`,
 before you execute it. Please be ready to wait a couple of minutes during the first run as Cortex Docker instance images need to be downloaded and cached.
 
 ## Contact Us
