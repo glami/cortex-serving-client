@@ -35,7 +35,7 @@ class IntegrationTests(unittest.TestCase):
                 path='yes_predictor.py',
             ),
             compute=dict(
-                cpu='290m',
+                cpu='200m',
             )
         )
 
@@ -60,7 +60,7 @@ class IntegrationTests(unittest.TestCase):
                 path='fail_predictor.py',
             ),
             compute=dict(
-                cpu='290m',
+                cpu='200m',
             )
         )
 
@@ -115,7 +115,7 @@ class IntegrationTests(unittest.TestCase):
                 path='yes_predictor.py',
             ),
             compute=dict(
-                cpu='290m',
+                cpu='200m',
             )
         )
         job_spec = {
