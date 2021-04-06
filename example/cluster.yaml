@@ -7,18 +7,29 @@ cluster_name: cortex-serving-client-test
 region: eu-west-1
 
 # instance type
-instance_type: t2.small
+node_groups:
+    - name: ng-spot-1
+      instance_type: t2.small
 
-# instance volume size (GB) (default: 50)
-instance_volume_size: 20
+      # instance volume size (GB) (default: 50)
+      instance_volume_size: 20
 
-min_instances: 0
-max_instances: 1
+      min_instances: 0
+      max_instances: 1
 
-spot: true
+      spot: true
 
-spot_config:
-    on_demand_backup: false
+    # second node group instead of on_demand_backup
+    - name: ng-demand-1
+      instance_type: t2.small
+
+      # instance volume size (GB) (default: 50)
+      instance_volume_size: 20
+
+      min_instances: 0
+      max_instances: 1
+
+      spot: false
 
 subnet_visibility: public
 nat_gateway: none
