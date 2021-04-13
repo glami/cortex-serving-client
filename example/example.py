@@ -26,7 +26,7 @@ deployment = dict(
         path='dummy_predictor.py',
     ),
     compute=dict(
-        cpu='290m',
+        cpu='200m',
     )
 )
 
