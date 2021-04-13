@@ -9,6 +9,8 @@ Warning: Below is an experimental version. Automation will be added later.
 
     ``` pip install -r requirements-dev.txt ```
 
+1. Select package version new_version where major and minor version should be equal to the supported cortex version and patch version is a custom version specific to this package.
+   
 1. Update and commit package version.
 
     ` vi setup.py `
@@ -20,5 +22,5 @@ Warning: Below is an experimental version. Automation will be added later.
    
 1. Execute and use your API token as a password:
    ```
-   bash ./publish_to_pypi.sh; 
+   bash ./publish_to_pypi.sh ${new_version}; 
    ```
