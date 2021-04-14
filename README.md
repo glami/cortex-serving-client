@@ -10,7 +10,7 @@ Cortex has [official Python client now](https://pypi.org/project/cortex/) ([sour
 - Prevent accidental charges by auto-removing deployments that exceeded a timeout.
 - Execute operations: deploy, delete, get, get all.
 - Stream remote logs into the local log with thread name set to the API name.
-- Supported Cortex Version: 0.32.0 (See requirements.txt)
+- Supported Cortex Version: 0.33.0 (See requirements.txt)
 
 Here is [a video about the package](https://youtu.be/aU95dBAspr0?t=510).
 
