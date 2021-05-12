@@ -395,10 +395,10 @@ class CortexClient:
                             logger.info(print_line)
 
         if job_id is None:
-            cmd_arr = [CORTEX_PATH, "logs", name, f"--env={self.cortex_env}"]
+            cmd_arr = [CORTEX_PATH, "logs", "--yes", name, f"--env={self.cortex_env}"]
 
         else:
-            cmd_arr = [CORTEX_PATH, "logs", name, job_id, f"--env={self.cortex_env}"]
+            cmd_arr = [CORTEX_PATH, "logs", "--yes", name, job_id, f"--env={self.cortex_env}"]
 
         worker = Thread(target=listen_on_logs, args=(cmd_arr,), daemon=True, name=f'api_{name}')
         worker.start()
