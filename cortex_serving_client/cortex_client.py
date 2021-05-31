@@ -119,7 +119,7 @@ class CortexClient:
         if "kind" not in deployment:
             deployment["kind"] = KIND_DEFAULT
 
-        predictor_yaml_str = yaml.dump([deployment], default_flow_style=False)
+        predictor_yaml_str = yaml.dump([deployment], default_style='"')
 
         if api_timeout_sec < CORTEX_MIN_API_TIMEOUT_SEC:
             logger.info(f'API timeout {api_timeout_sec} is be smaller than minimal API timeout {CORTEX_MIN_API_TIMEOUT_SEC}. Setting it to {CORTEX_MIN_API_TIMEOUT_SEC} to avoid excessive GC.')

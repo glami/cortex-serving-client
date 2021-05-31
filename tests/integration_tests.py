@@ -33,6 +33,7 @@ class IntegrationTests(unittest.TestCase):
             predictor=dict(
                 type='python',
                 path='yes_predictor.py',
+                env=dict(test="78638e39"),
             ),
             compute=dict(
                 cpu='200m',
