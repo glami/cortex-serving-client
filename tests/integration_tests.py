@@ -1,4 +1,6 @@
 import logging
+import time
+from threading import Thread
 
 logging.basicConfig(
     format="%(asctime)s : %(levelname)s : %(threadName)-10s : %(name)s : %(message)s", level=logging.INFO
@@ -10,7 +12,7 @@ from requests import post
 import unittest
 
 from cortex_serving_client.cortex_client import get_cortex_client_instance, NOT_DEPLOYED_STATUS, JOB_STATUS_SUCCEEDED, \
-    KIND_BATCH_API
+    KIND_BATCH_API, open_pg_cursor, DB_RETRY_SEC
 from cortex_serving_client.deployment_failed import DeploymentFailed, DEPLOYMENT_TIMEOUT_FAIL_TYPE, \
     DEPLOYMENT_ERROR_FAIL_TYPE
 
@@ -132,6 +134,34 @@ class IntegrationTests(unittest.TestCase):
         )
         assert job_result.status == JOB_STATUS_SUCCEEDED
         self.assertEqual(self.cortex.get(deployment['name']).status, NOT_DEPLOYED_STATUS)
+
+    def test_db_connections_exhaustion(self):
+        errors = []
+
+        def thread_method():
+            try:
+                for _ in range(2):
+                    with open_pg_cursor(self.cortex.db_connection_pool) as cur:
+                        cur.execute('select * from cortex_api_timeout')
+                        cur.fetchall()
+                        time.sleep(DB_RETRY_SEC / 2)
+
+            except Exception as e:
+                errors.append(e)
+
+        threads = []
+        for i in range(4):
+            t = Thread(target=thread_method)
+            t.start()
+            threads.append(t)
+
+        for thread in threads:
+            thread.join(timeout=3 * DB_RETRY_SEC)
+            self.assertFalse(thread.isAlive())
+
+        self.assertListEqual(errors, [])
+        # additionally the std output should contain "connection pool exhausted"
+
 
 
 
