@@ -17,7 +17,7 @@ import yaml
 from cortex.binary import get_cli_path
 from psycopg2._psycopg import DatabaseError
 from psycopg2.extras import NamedTupleCursor
-from psycopg2.pool import ThreadedConnectionPool
+from psycopg2.pool import ThreadedConnectionPool, PoolError
 
 from cortex_serving_client.command_line_wrapper import _verbose_command_wrapper
 from cortex_serving_client.deployment_failed import DeploymentFailed, COMPUTE_UNAVAILABLE_FAIL_TYPE, \
@@ -60,6 +60,8 @@ CORTEX_DEPLOY_RETRY_BASE_SLEEP_SEC = 5 * 60
 CORTEX_STATUS_CHECK_SLEEP_SEC = 15
 INFINITE_TIMEOUT_SEC = 30 * 365 * 24 * 60 * 60  # 30 years
 WAIT_BEFORE_JOB_GET = int(os.environ.get('CORTEX_WAIT_BEFORE_JOB_GET', str(30)))
+DB_TRIES = 10
+DB_RETRY_SEC = 5
 
 CORTEX_PATH = get_cli_path()
 
@@ -529,10 +531,22 @@ class CortexClient:
 @contextmanager
 def open_pg_cursor(db_connection_pool, key=None):
     try:
-        with db_connection_pool.getconn(key) as conn:
-            conn.autocommit = True
-            with conn.cursor() as cur:
-                yield cur
+        for retry in range(DB_TRIES):
+            try:
+                with db_connection_pool.getconn(key) as conn:
+                    conn.autocommit = True
+                    with conn.cursor() as cur:
+                        yield cur
+
+                    break
+
+            except PoolError as e:
+                if retry + 1 >= DB_TRIES:
+                    raise ValueError(f'Retries exhausted with retry {retry}.') from e
+
+                logger.info(f'DB pool error: {e}. Sleeping for an retry {retry}.')
+                # sleep release GIL, allowing other threads to continue
+                time.sleep(DB_RETRY_SEC)
 
     finally:
         db_connection_pool.putconn(conn, key)
