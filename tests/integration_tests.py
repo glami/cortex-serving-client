@@ -12,7 +12,7 @@ from requests import post
 import unittest
 
 from cortex_serving_client.cortex_client import get_cortex_client_instance, NOT_DEPLOYED_STATUS, JOB_STATUS_SUCCEEDED, \
-    KIND_BATCH_API, open_pg_cursor, DB_RETRY_SEC
+    KIND_BATCH_API, open_pg_cursor, DB_RETRY_SEC, JOBS_FINISHED_OK_STATUSES
 from cortex_serving_client.deployment_failed import DeploymentFailed, DEPLOYMENT_TIMEOUT_FAIL_TYPE, \
     DEPLOYMENT_ERROR_FAIL_TYPE
 
@@ -132,7 +132,7 @@ class IntegrationTests(unittest.TestCase):
             api_timeout_sec=10 * 60,
             print_logs=True,
         )
-        assert job_result.status == JOB_STATUS_SUCCEEDED
+        self.assertIn(job_result.status, JOBS_FINISHED_OK_STATUSES)
         self.assertEqual(self.cortex.get(deployment['name']).status, NOT_DEPLOYED_STATUS)
 
     def test_db_connections_exhaustion(self):
