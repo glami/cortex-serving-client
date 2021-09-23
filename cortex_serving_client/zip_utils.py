@@ -26,4 +26,3 @@ def zip_dir(dir_path, archive_path: str):
 def add_file_to_zip(archive_path, file_path):
     with zipfile.ZipFile(archive_path, "a") as zf:
         zf.write(file_path, Path(file_path).name)
-    print(f"Added {file_path} to archive {archive_path}")

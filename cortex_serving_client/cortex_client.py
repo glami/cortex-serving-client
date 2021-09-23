@@ -172,7 +172,7 @@ class CortexClient:
                                                 f"main:app must be runnable by Uvicorn!"
             else:
                 # add default main.py if it was not supplied
-                add_file_to_zip(local_zip_path, Path(__file__).parent.parent / 'resources' / 'main.py')
+                add_file_to_zip(local_zip_path, Path(__file__).parent / 'resources' / 'main.py')
 
                 predictor_filepath = Path(deploy_dir) / f"{predictor_path.replace('.', '/')}.py"
                 try:
