@@ -31,6 +31,7 @@ node_groups:
 
       spot: false
 
+
 subnet_visibility: public
 nat_gateway: none
 
@@ -41,3 +42,8 @@ api_load_balancer_scheme: internet-facing  # must be "internet-facing" or "inter
 # whether the operator load balancer should be internet-facing or internal (default: "internet-facing")
 # note: if using "internal", you must configure VPC Peering to connect your CLI to your cluster operator (see www.cortex.dev/guides/vpc-peering)
 operator_load_balancer_scheme: internet-facing  # must be "internet-facing" or "internal"
+
+tags:
+  Application: cortex-serving-client-test
+  Environment: test
+  Department: ai
