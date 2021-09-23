@@ -1,14 +1,17 @@
 import contextlib
-import io
 import json
 import logging
+import multiprocessing
 import os
 import subprocess
+import tempfile
 import time
 from contextlib import contextmanager
+from copy import deepcopy
 from datetime import datetime, timedelta
 from json import JSONDecodeError
 from math import ceil
+from pathlib import Path
 from threading import Thread
 from typing import NamedTuple, Optional, Dict, List, Callable
 
@@ -17,13 +20,18 @@ import yaml
 from cortex.binary import get_cli_path
 from psycopg2._psycopg import DatabaseError
 from psycopg2.extras import NamedTupleCursor
-from psycopg2.pool import ThreadedConnectionPool, PoolError
+from psycopg2.pool import ThreadedConnectionPool
 
+from cortex_serving_client import s3
 from cortex_serving_client.command_line_wrapper import _verbose_command_wrapper
 from cortex_serving_client.deployment_failed import DeploymentFailed, COMPUTE_UNAVAILABLE_FAIL_TYPE, \
     DEPLOYMENT_TIMEOUT_FAIL_TYPE, DEPLOYMENT_ERROR_FAIL_TYPE, DEPLOYMENT_JOB_NOT_DEPLOYED_FAIL_TYPE
+from cortex_serving_client.hash_utils import get_file_hash
 from cortex_serving_client.printable_chars import remove_non_printable
 from cortex_serving_client.retry_utils import create_always_retry_session
+from cortex_serving_client.s3 import BUCKET_NAME, BUCKET_SSE_KEY
+from cortex_serving_client.shell_utils import kill_process_with_children
+from cortex_serving_client.zip_utils import zip_dir, add_file_to_zip
 
 KIND_REALTIME_API = 'RealtimeAPI'
 KIND_BATCH_API = 'BatchAPI'
@@ -44,13 +52,35 @@ COMPUTE_UNAVAILABLE_STATUS = "status_stalled"
 CORTEX_STATUSES = [LIVE_STATUS, UPDATING_STATUS, "status_error", "status_oom", COMPUTE_UNAVAILABLE_STATUS]  #
 NOT_DEPLOYED_STATUS = "status_not_deployed"
 
-JOB_STATUS_SUCCEEDED = 'status_succeeded'
-JOB_STATUS_ENQUEUING = 'status_enqueuing'
-JOB_STATUS_RUNNING = 'status_running'
-JOB_STATUS_UNEXPECTED_ERROR = 'status_unexpected_error'
-JOB_STATUS_ENQUEUED_FAILED = 'status_enqueue_failed'
-JOB_STATUS_COMPLETED_WITH_FAILURES = 'status_completed_with_failures'
-JOB_FINISHED_OK_STATUSES = (JOB_STATUS_SUCCEEDED, JOB_STATUS_COMPLETED_WITH_FAILURES)
+# returned if cortex describe says Failed
+API_FAILED_STATUS = "api_failed_status"
+
+JOB_STATUS_SUCCEEDED = 'succeeded'
+JOB_STATUS_ENQUEUING = 'enqueuing'
+JOB_STATUS_RUNNING = 'running'
+JOB_STATUS_ENQUEUED_FAILED = 'failed_while_enqueuing'
+JOB_STATUS_COMPLETED_WITH_FAILURES = 'completed_with_failures'
+JOB_STATUS_WORKER_ERROR = 'worker_error'
+JOB_STATUS_OOM = 'out_of_memory'
+JOB_STATUS_TIMED_OUT = 'timed_out'
+JOB_STATUS_STOPPED = 'stopped'
+JOB_STATUS_UNEXPECTED_STATUS = 'unexpected_status'
+
+JOB_FAIL_STATUSES = [
+    JOB_STATUS_ENQUEUED_FAILED,
+    JOB_STATUS_WORKER_ERROR,
+    JOB_STATUS_OOM,
+    JOB_STATUS_TIMED_OUT,
+    JOB_STATUS_STOPPED,
+    API_FAILED_STATUS
+]
+
+JOB_VALID_STATUSES = [
+    JOB_STATUS_SUCCEEDED,
+    JOB_STATUS_ENQUEUING,
+    JOB_STATUS_RUNNING,
+    JOB_STATUS_COMPLETED_WITH_FAILURES,
+] + JOB_FAIL_STATUSES
 
 
 CORTEX_DELETE_TIMEOUT_SEC = 10 * 60
@@ -62,13 +92,17 @@ CORTEX_DEPLOY_RETRY_BASE_SLEEP_SEC = 5 * 60
 CORTEX_STATUS_CHECK_SLEEP_SEC = 15
 INFINITE_TIMEOUT_SEC = 30 * 365 * 24 * 60 * 60  # 30 years
 WAIT_BEFORE_JOB_GET = int(os.environ.get('CORTEX_WAIT_BEFORE_JOB_GET', str(30)))
-DB_TRIES = 10
-DB_RETRY_SEC = 5
+N_RETRIES_BATCH_JOB = 5
 
 CORTEX_PATH = get_cli_path()
 
 logger = logging.getLogger('cortex_client')
 __cortex_client_instance = None
+
+# insert your base image id
+DEFAULT_DOCKER_IMAGE = os.environ["CSC_DEFAULT_BASE_DOCKER_IMAGE"]
+DEFAULT_PORT = os.environ.get("CSC_DEFAULT_UVICORN_PORT", 8080)
+DEFAULT_PREDICTOR_CLASS_NAME = "PythonPredictor"
 
 
 class CortexClient:
@@ -83,10 +117,100 @@ class CortexClient:
         self.cortex_vanilla = cortex.client(self.cortex_env)
         logger.info(f'Constructing CortexClient for {CORTEX_PATH}.')
 
+    @staticmethod
+    def _prepare_deployment(deployment, deploy_dir):
+        deployment = deepcopy(deployment)
+        name = deployment["name"]
+
+        if "kind" not in deployment:
+            deployment["kind"] = KIND_DEFAULT
+
+        assert len(deployment["pod"]['containers']) == 1, f"Number of containers must be 1 for simplicity! " \
+                                                          f"Not {len(deployment['pod']['containers'])}"
+        container = deployment["pod"]['containers'][0]
+
+        docker_image = container.get("image", DEFAULT_DOCKER_IMAGE)
+        container['image'] = docker_image
+
+        port = deployment["pod"].get('port', DEFAULT_PORT)
+        deployment["pod"]["port"] = port
+
+        if 'name' not in container:
+            container['name'] = 'api'
+
+        project_name = deployment.pop("project_name")
+        predictor_path = deployment.pop("predictor_path")
+        predictor_class_name = deployment.pop("predictor_class_name", DEFAULT_PREDICTOR_CLASS_NAME)
+        bucket_name = deployment.pop("bucket_name", BUCKET_NAME)
+        bucket_sse_key = deployment.pop("bucket_sse_key", BUCKET_SSE_KEY)
+        config = container.pop("config", {})
+        with tempfile.TemporaryDirectory() as tmp_dir_name:
+            fname = f"{name}.zip"
+            local_zip_path = str(Path(tmp_dir_name) / fname)
+            s3_path = f"{project_name}/{fname}"
+            zip_dir(deploy_dir, local_zip_path)
+
+            # dump config and add it to zipped deploy dir
+            config_path = str(Path(tmp_dir_name) / 'predictor_config.json')
+            with open(config_path, 'w') as f:
+                json.dump(config, f)
+            add_file_to_zip(local_zip_path, config_path)
+
+            # add empty requirements.txt if it does not exist - it is mandatory
+            requirements_path = Path(deploy_dir) / "requirements.txt"
+            if not requirements_path.exists():
+                tmp_req_path = str(Path(tmp_dir_name) / 'requirements.txt')
+                open(tmp_req_path, 'w').close()
+                add_file_to_zip(local_zip_path, tmp_req_path)
+
+            # add or check main.py
+            main_path = Path(deploy_dir) / "main.py"
+            if main_path.exists():
+                with open(main_path, 'rt') as f:
+                    code = ''.join(f.readlines())
+                    assert '@app.post' in code, f"API {name} failed to deploy: @app.post not found in {main_path}! " \
+                                                f"main:app must be runnable by Uvicorn!"
+            else:
+                # add default main.py if it was not supplied
+                add_file_to_zip(local_zip_path, Path(__file__).parent.parent / 'resources' / 'main.py')
+
+                predictor_filepath = Path(deploy_dir) / f"{predictor_path.replace('.', '/')}.py"
+                try:
+                    with open(predictor_filepath, 'rt') as f:
+                        code = ''.join(f.readlines())
+                        assert predictor_class_name in code, f"{predictor_class_name} not found in {predictor_filepath}!"
+                except Exception as e:
+                    raise RuntimeError(f"API {name} failed to deploy:") from e
+
+            s3.upload_file(local_zip_path, s3_path, bucket_name, bucket_sse_key, verbose=True)
+
+            # add necessary env vars
+            if 'env' not in container:
+                container['env'] = {}
+            container["env"]['CSC_BUCKET_NAME'] = bucket_name
+            container["env"]['CSC_S3_SSE_KEY'] = bucket_sse_key
+            container["env"]['CSC_S3_SOURCE_ZIP_PATH'] = s3_path
+            container["env"]['CSC_UVICORN_PORT'] = port
+            container["env"]['CSC_PREDICTOR_PATH'] = predictor_path
+            container["env"]['CSC_PREDICTOR_CLASS_NAME'] = predictor_class_name
+            # so redeploy actually deploys the new code
+            container["env"]['CSC_HASH_OF_THE_CODE_DIR'] = get_file_hash(local_zip_path)
+
+            # env must be string -> string map
+            container['env'] = {str(k): str(v) for k, v in container['env'].items()}
+        return deployment
+
+    @staticmethod
+    def _kill_log_worker(log_worker):
+        if log_worker is not None and log_worker.is_alive():
+            logger.info(f"Killing process printing logs with pid: {log_worker.pid} ...")
+            # log_worker.terminate() will not actually terminate the subprocess streaming logs :(
+            kill_process_with_children(log_worker.pid)
+
     def deploy_single(
         self,
         deployment: Dict,
-        dir,
+        deploy_dir,
         deployment_timeout_sec=CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT,
         api_timeout_sec=CORTEX_DEFAULT_API_TIMEOUT,
         print_logs=False,
@@ -100,7 +224,7 @@ class CortexClient:
 
         deployment
             Cortex deployment config. See https://docs.cortex.dev/deployments/api-configuration
-        dir
+        deploy_dir
             Base directory of code to deploy to Cortex.
         deployment_timeout_sec
             Time to keep the API deploying. Including execution of predictor's `__init__`,
@@ -108,7 +232,7 @@ class CortexClient:
         api_timeout_sec
             Time until API will be auto-deleted. Use `INFINITE_TIMEOUT_SEC` for infinite.
         print_logs
-            Subscribe to Cortex logs of the API and print them to stdout.
+            Subscribe to Cortex logs of the API and print random pod's logs to stdout.
         n_retries
             Number of attempts to deploy until raising the failure. Retries only if the failure is not an application error.
 
@@ -118,10 +242,8 @@ class CortexClient:
             Deployed API get result information.
 
         """
-
+        deployment = self._prepare_deployment(deployment, deploy_dir)
         name = deployment["name"]
-        if "kind" not in deployment:
-            deployment["kind"] = KIND_DEFAULT
 
         predictor_yaml_str = yaml.dump([deployment], default_style='"')
 
@@ -135,8 +257,9 @@ class CortexClient:
 
         # file has to be created the dir to which python predictors are described in yaml
         filename = f"{name}.yaml"
-        filepath = f"{dir}/{filename}"
+        filepath = f"{deploy_dir}/{filename}"
 
+        log_worker = None
         for retry in range(n_retries + 1):
             try:
                 self._collect_garbage()
@@ -144,16 +267,23 @@ class CortexClient:
                     gc_timeout_sec = deployment_timeout_sec + CORTEX_DELETE_TIMEOUT_SEC
                     logger.info(f"Deployment {name} has deployment timeout {deployment_timeout_sec}sec and GC timeout {gc_timeout_sec}sec.")
                     self._insert_or_update_gc_timeout(name, gc_timeout_sec)
-                    _verbose_command_wrapper([CORTEX_PATH, "deploy", filename, f"--env={self.cortex_env}", "--yes", "-o=json"], cwd=dir)
+                    _verbose_command_wrapper([CORTEX_PATH, "deploy", filename, f"--env={self.cortex_env}", "--yes", "-o=json"], cwd=deploy_dir)
 
                 if print_logs and deployment['kind'] == KIND_REALTIME_API:
-                    self._cortex_logs_print_async(name)
+                    assert log_worker is None or not log_worker.is_alive(), f"Should be None or dead!"
+                    log_worker = self._cortex_logs_print_async(name)
 
                 start_time = time.time()
                 while True:
+                    if log_worker is not None and not log_worker.is_alive():
+                        # necessary because cortex logs interrupts when pod is spun up and has to be run again
+                        log_worker = self._cortex_logs_print_async(name)
+
                     get_result = self.get(name)
                     time_since_start = ceil(time.time() - start_time)
+
                     if get_result.status == LIVE_STATUS:
+                        self._kill_log_worker(log_worker)
                         gc_timeout_sec = api_timeout_sec + CORTEX_DELETE_TIMEOUT_SEC
                         logger.info(f"Deployment {name} successful. Setting API timeout {api_timeout_sec}sec and GC timeout {gc_timeout_sec}sec.")
                         self._insert_or_update_gc_timeout(name, gc_timeout_sec)
@@ -180,6 +310,7 @@ class CortexClient:
 
             except DeploymentFailed as e:
                 if retry == n_retries or e.failure_type == DEPLOYMENT_ERROR_FAIL_TYPE:
+                    self._kill_log_worker(log_worker)
                     raise e
 
                 else:
@@ -194,7 +325,7 @@ class CortexClient:
     def deploy_temporarily(
         self,
         deployment: Dict,
-        dir,
+        deploy_dir: str,
         deployment_timeout_sec=CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT,
         api_timeout_sec=CORTEX_DEFAULT_API_TIMEOUT,
         print_logs=False,
@@ -208,7 +339,7 @@ class CortexClient:
 
         deployment
             Cortex deployment config. See https://docs.cortex.dev/deployments/api-configuration
-        dir
+        deploy_dir
             Base directory of code to deploy to Cortex.
         deployment_timeout_sec
             Time to keep the API deploying. Including execution of predictor's `__init__`,
@@ -216,7 +347,7 @@ class CortexClient:
         api_timeout_sec
             Time until API will be auto-deleted. Use `INFINITE_TIMEOUT_SEC` for infinite.
         print_logs
-            Subscribe to Cortex logs of the API and print them to stdout.
+            Subscribe to Cortex logs of the API and print random pod's logs to stdout.
         n_retries
             Number of attempts to deploy until raising the failure. Retries only if the failure is not an application error.
 
@@ -228,23 +359,30 @@ class CortexClient:
         """
 
         try:
-            yield self.deploy_single(deployment, dir, deployment_timeout_sec, api_timeout_sec, print_logs, n_retries)
+            yield self.deploy_single(deployment, deploy_dir, deployment_timeout_sec, api_timeout_sec, print_logs, n_retries)
 
         finally:
             self.delete(deployment["name"])
 
     def deploy_batch_api_and_run_job(self,
-                                     deployment,
-                                     job_spec,
-                                     dir,
+                                     deployment: dict,
+                                     job_spec: dict,
+                                     deploy_dir: str,
                                      deployment_timeout_sec=CORTEX_DEFAULT_DEPLOYMENT_TIMEOUT,
                                      api_timeout_sec=CORTEX_DEFAULT_API_TIMEOUT,
                                      print_logs=False,
+                                     verbose=False,
                                      n_retries=0) -> "CortexGetResult":
+
+        deployment['kind'] = deployment.get('kind', KIND_BATCH_API)
+        assert deployment['kind'] == KIND_BATCH_API, f"Deployment['kind'] must be {KIND_BATCH_API}!"
+
+        # has to be in BatchAPI, no idea why ...
+        deployment['pod']['containers'][0]['command'] = ["python", "/tmp/download_source_code.py"]
 
         with self.deploy_temporarily(
                 deployment,
-                dir=dir,
+                deploy_dir=deploy_dir,
                 deployment_timeout_sec=deployment_timeout_sec,
                 api_timeout_sec=api_timeout_sec,
                 print_logs=print_logs,
@@ -254,7 +392,7 @@ class CortexClient:
             logger.info(f'BatchAPI {deployment["name"]} deployed. Starting a job.')
             with create_always_retry_session() as session:
                 job_id = None
-                for retry_job_get in range(5):
+                for retry_job_get in range(N_RETRIES_BATCH_JOB):
                     for retry_job_submit in range(3):
                         try:
                             job_json = session.post(get_result.endpoint, json=job_spec, timeout=10 * 60).json()
@@ -276,21 +414,34 @@ class CortexClient:
                     if job_id is None:
                         raise ValueError(f'job_id not in job_json {json.dumps(job_json)}')
 
-                    time.sleep(WAIT_BEFORE_JOB_GET * 2 ** retry_job_get)  # Don't call job too early: https://gitter.im/cortexlabs/cortex?at=5f7fe4c01cbba72b63cb745f
-
+                    log_worker = None
                     if print_logs:
-                        self._cortex_logs_print_async(deployment['name'], job_id)
+                        log_worker = self._cortex_logs_print_async(deployment['name'], job_id)
+
+                    # Don't call job too early: https://gitter.im/cortexlabs/cortex?at=5f7fe4c01cbba72b63cb745f
+                    time.sleep(WAIT_BEFORE_JOB_GET * 2 ** retry_job_get)
 
                     job_status = JOB_STATUS_ENQUEUING
                     while job_status in (JOB_STATUS_ENQUEUING, JOB_STATUS_RUNNING):
+                        if log_worker is not None and not log_worker.is_alive():
+                            # necessary because cortex logs interrupts when pod is spun up and has to be run again
+                            log_worker = self._cortex_logs_print_async(deployment['name'], job_id)
+
                         job_result = self.get(deployment["name"], job_id)
                         job_status = job_result.status
+                        if verbose:
+                            logger.info(f"Job {job_id} has status: {job_status}")
                         time.sleep(30)
 
-                    if job_status in (NOT_DEPLOYED_STATUS, JOB_STATUS_UNEXPECTED_ERROR, JOB_STATUS_ENQUEUED_FAILED):
+                    if log_worker is not None:
+                        logger.info(f"Terminating process printing logs from {deployment['name']} job_id={job_id} ...")
+                        log_worker.terminate()
+
+                    if job_status in [NOT_DEPLOYED_STATUS, JOB_STATUS_UNEXPECTED_STATUS] + JOB_FAIL_STATUSES:
                         # TODO request fixes improvements https://gitter.im/cortexlabs/cortex?at=5f7fe4c01cbba72b63cb745f
                         # Sleep in after job submission.
                         logger.warning(f'Job unexpectedly undeployed or failed with status {job_status}. Retrying with sleep.')
+                        logger.info(f"Finished retry {retry_job_get+1}/{N_RETRIES_BATCH_JOB}")
                         continue
 
                     else:
@@ -331,15 +482,26 @@ class CortexClient:
         if json_dict is not None:
             if job_id is not None:
                 job_status = json_dict['job_status']["status"]
+                if job_status not in JOB_VALID_STATUSES:
+                    logger.warning(f"Unexpected status: {job_status} of job: {job_id}!")
+                    job_status = JOB_STATUS_UNEXPECTED_STATUS
                 return CortexGetResult(job_status, None, json_dict)
 
             first_json_dict = json_dict[0]
-            if first_json_dict['spec']['kind'] == KIND_BATCH_API:
+            if first_json_dict['spec']['kind'] in [KIND_BATCH_API, KIND_TASK_API]:
                 # BatchAPI has no status
                 return CortexGetResult(LIVE_STATUS, first_json_dict['endpoint'], first_json_dict)
 
             else:
-                return CortexGetResult(first_json_dict['status']['status_code'], first_json_dict['endpoint'], first_json_dict)
+                # check RealtimeAPI or AsyncAPI
+                cmd_describe = [CORTEX_PATH, "describe", name, f"--env={self.cortex_env}"]
+                describe_out = _verbose_command_wrapper(cmd_describe,
+                                                        allow_non_0_return_code_on_stdout_sub_strs=[NOT_DEPLOYED])
+                if 'Failed' in describe_out:
+                    # Failed appears in the output only if there is >0 of Failed replicas
+                    return CortexGetResult(API_FAILED_STATUS, None, describe_out)
+                else:
+                    return CortexGetResult(status_from_dict(first_json_dict['status']), first_json_dict['endpoint'], first_json_dict)
 
         elif NOT_DEPLOYED in first_line:
             return CortexGetResult(NOT_DEPLOYED_STATUS, None, dict())
@@ -351,7 +513,7 @@ class CortexClient:
         input_in_case_endpoint_prompt = b"n\n"
         out = _verbose_command_wrapper([CORTEX_PATH, "get", f"--env={self.cortex_env}", "-o=json"], input=input_in_case_endpoint_prompt)
         json_dict = json.loads(out.strip())
-        return [CortexGetAllStatus(e['spec']['name'], e['status']['status_code'] if e['spec']['kind'] == KIND_REALTIME_API else LIVE_STATUS, e) for e in json_dict]
+        return [CortexGetAllStatus(e['metadata']['name'], status_from_dict(e['status']) if e['metadata']['kind'] == KIND_REALTIME_API else LIVE_STATUS, e) for e in json_dict]
 
     def delete(self, name, force=False, timeout_sec=CORTEX_DELETE_TIMEOUT_SEC, cursor=None) -> "CortexGetResult":
         """
@@ -391,21 +553,27 @@ class CortexClient:
 
     def _cortex_logs_print_async(self, name, job_id=None):
         def listen_on_logs(cmd_arr):
+            logger.debug(f"Started log watch process pid: {os.getpid()} ...")
             with subprocess.Popen(cmd_arr, stdout=subprocess.PIPE) as logs_sp:
-                with io.TextIOWrapper(logs_sp.stdout, encoding="utf-8") as logs_out:
-                    for line in logs_out:
-                        print_line = remove_non_printable(line.rstrip('\n'))
-                        if len(print_line) > 0:
-                            logger.info(print_line)
+                while True:
+                    # returns None while subprocess is running
+                    retcode = logs_sp.poll()
+                    line = logs_sp.stdout.readline().decode(encoding='utf-8')
+                    print_line = remove_non_printable(line.rstrip('\n'))
+                    if len(print_line) > 0:
+                        logger.info(print_line)
+                    if retcode is not None:
+                        break
 
         if job_id is None:
-            cmd_arr = [CORTEX_PATH, "logs", "--yes", name, f"--env={self.cortex_env}"]
+            cmd_arr = [CORTEX_PATH, "logs", "--yes", "--random-pod", name, f"--env={self.cortex_env}"]
 
         else:
-            cmd_arr = [CORTEX_PATH, "logs", "--yes", name, job_id, f"--env={self.cortex_env}"]
+            cmd_arr = [CORTEX_PATH, "logs", "--yes", "--random-pod", name, job_id, f"--env={self.cortex_env}"]
 
-        worker = Thread(target=listen_on_logs, args=(cmd_arr,), daemon=True, name=f'api_{name}')
+        worker = multiprocessing.Process(target=listen_on_logs, args=(cmd_arr,), daemon=False, name=f'api_{name}')
         worker.start()
+        return worker
 
     @staticmethod
     def _modify_ultimate_timeout_to_delete_timeout(cur, name):
@@ -533,25 +701,24 @@ class CortexClient:
 @contextmanager
 def open_pg_cursor(db_connection_pool, key=None):
     try:
-        for retry in range(DB_TRIES):
-            try:
-                with db_connection_pool.getconn(key) as conn:
-                    conn.autocommit = True
-                    with conn.cursor() as cur:
-                        yield cur
-
-                    break
-
-            except PoolError as e:
-                if retry + 1 >= DB_TRIES:
-                    raise ValueError(f'Retries exhausted with retry {retry}.') from e
-
-                logger.info(f'DB pool error: {e}. Sleeping for an retry {retry}.')
-                # sleep release GIL, allowing other threads to continue
-                time.sleep(DB_RETRY_SEC)
+        with db_connection_pool.getconn(key) as conn:
+            conn.autocommit = True
+            with conn.cursor() as cur:
+                yield cur
 
     finally:
         db_connection_pool.putconn(conn, key)
+
+
+def status_from_dict(status_dict):
+    ready = status_dict['ready']
+    requested = status_dict['requested']
+    up_to_date = status_dict['up_to_date']
+
+    if ready == requested and ready == up_to_date and ready > 0:
+        return LIVE_STATUS
+    else:
+        return UPDATING_STATUS
 
 
 class CortexGetAllStatus(NamedTuple):
