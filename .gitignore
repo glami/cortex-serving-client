@@ -3,3 +3,4 @@ __pycache__
 /build
 /cortex_serving_client.egg-info
 /dist
+/tmp
