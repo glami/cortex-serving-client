@@ -33,6 +33,8 @@ from cortex_serving_client.s3 import BUCKET_NAME, BUCKET_SSE_KEY
 from cortex_serving_client.shell_utils import kill_process_with_children
 from cortex_serving_client.zip_utils import zip_dir, add_file_to_zip
 
+ENV_CSC_DEFAULT_DOCKER_IMAGE = "CSC_DEFAULT_BASE_DOCKER_IMAGE"
+
 KIND_REALTIME_API = 'RealtimeAPI'
 KIND_BATCH_API = 'BatchAPI'
 KIND_ASYNC_API = 'AsyncAPI'
@@ -100,7 +102,7 @@ logger = logging.getLogger('cortex_client')
 __cortex_client_instance = None
 
 # insert your base image id
-DEFAULT_DOCKER_IMAGE = os.environ["CSC_DEFAULT_BASE_DOCKER_IMAGE"]
+DEFAULT_DOCKER_IMAGE = os.environ.get(ENV_CSC_DEFAULT_DOCKER_IMAGE)
 DEFAULT_PORT = os.environ.get("CSC_DEFAULT_UVICORN_PORT", 8080)
 DEFAULT_PREDICTOR_CLASS_NAME = "PythonPredictor"
 
@@ -130,6 +132,9 @@ class CortexClient:
         container = deployment["pod"]['containers'][0]
 
         docker_image = container.get("image", DEFAULT_DOCKER_IMAGE)
+        if docker_image is None:
+            raise ValueError(f'Image needs to be provided either in the container configuration or as environmental variable {ENV_CSC_DEFAULT_DOCKER_IMAGE}.')
+
         container['image'] = docker_image
 
         port = deployment["pod"].get('port', DEFAULT_PORT)
