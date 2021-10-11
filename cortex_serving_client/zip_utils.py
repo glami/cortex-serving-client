@@ -1,4 +1,4 @@
-import os
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -12,15 +12,13 @@ def zip_dir(dir_path, archive_path: str):
     :param dir_path: Path to directory to compress.
     :param archive_path: Path to the zip file.
     """
-    with zipfile.ZipFile(archive_path, "w") as zf:
-        cwd = Path().cwd()
-        os.chdir(str(dir_path))
-        for dirname, subdirs, files in os.walk('.'):
-            if dirname != '.':
-                zf.write(dirname)
-            for filename in files:
-                zf.write(os.path.join(dirname, filename))
-        os.chdir(cwd)
+    archive_path = str(archive_path)
+    if archive_path.endswith('.zip'):
+        archive_path = archive_path[:-4]  # remove .zip
+    else:
+        raise RuntimeError(f"archive_path {archive_path} must end with '.zip'!")
+
+    shutil.make_archive(archive_path, 'zip', root_dir=dir_path, base_dir='.')
 
 
 def add_file_to_zip(archive_path, file_path):
