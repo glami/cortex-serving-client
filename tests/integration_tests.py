@@ -2,6 +2,7 @@ import io
 import logging
 import os
 import pickle
+from concurrent.futures import ThreadPoolExecutor
 from time import sleep
 
 from cortex_serving_client import s3
@@ -53,6 +54,26 @@ class IntegrationTests(unittest.TestCase):
             },
             "node_groups": ['ng-spot-1']
         }
+
+    def test_thread_safety(self):
+        def get_deploy_dict(a):
+            deployment = IntegrationTests._get_deployment_dict("yes-api")
+            cortex_ = get_cortex_client_instance(
+                cortex_env='cortex-serving-client-test',  # if you create cluster by using example/cluster.yaml
+                pg_user='cortex_test',
+                pg_password='cortex_test',
+                pg_db='cortex_test',
+            )
+            x = cortex_._prepare_deployment(deployment, "./data/yes_deployment")
+            return len(x)
+
+        with ThreadPoolExecutor(max_workers=40) as e:
+            futures = []
+            for _ in range(100):
+                futures.append(e.submit(get_deploy_dict, 1))
+
+            for f in futures:
+                logger.info(f.result())  # necessary to get the exceptions to the main thread
 
     def test_deploy_yes(self):
         deployment = self._get_deployment_dict("yes-api")

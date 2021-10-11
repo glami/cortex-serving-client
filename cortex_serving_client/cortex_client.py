@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from json import JSONDecodeError
 from math import ceil
 from pathlib import Path
-from threading import Thread
+from threading import Thread, Lock
 from typing import NamedTuple, Optional, Dict, List, Callable
 
 import cortex
@@ -110,6 +110,8 @@ DEFAULT_PREDICTOR_CLASS_NAME = "PythonPredictor"
 class CortexClient:
     """
     An object used to execute commands on Cortex, maintain API state in the db to collect garbage.
+
+    Is thread-safe but not process-safe.
     """
 
     def __init__(self, db_connection_pool: ThreadedConnectionPool, gc_interval_sec=30 * 60, cortex_env="aws"):
@@ -117,10 +119,10 @@ class CortexClient:
         self._init_garbage_api_collector(gc_interval_sec)
         self.cortex_env = cortex_env
         self.cortex_vanilla = cortex.client(self.cortex_env)
+        self.lock = Lock()
         logger.info(f'Constructing CortexClient for {CORTEX_PATH}.')
 
-    @staticmethod
-    def _prepare_deployment(deployment, deploy_dir):
+    def _prepare_deployment(self, deployment, deploy_dir):
         deployment = deepcopy(deployment)
         name = deployment["name"]
 
@@ -149,60 +151,61 @@ class CortexClient:
         bucket_name = deployment.pop("bucket_name", BUCKET_NAME)
         bucket_sse_key = deployment.pop("bucket_sse_key", BUCKET_SSE_KEY)
         config = container.pop("config", {})
-        with tempfile.TemporaryDirectory() as tmp_dir_name:
-            fname = f"{name}.zip"
-            local_zip_path = str(Path(tmp_dir_name) / fname)
-            s3_path = f"{project_name}/{fname}"
-            zip_dir(deploy_dir, local_zip_path)
+        with self.lock:
+            with tempfile.TemporaryDirectory() as tmp_dir_name:
+                fname = f"{name}.zip"
+                local_zip_path = str(Path(tmp_dir_name) / fname)
+                s3_path = f"{project_name}/{fname}"
+                zip_dir(deploy_dir, local_zip_path)
 
-            # dump config and add it to zipped deploy dir
-            config_path = str(Path(tmp_dir_name) / 'predictor_config.json')
-            with open(config_path, 'w') as f:
-                json.dump(config, f)
-            add_file_to_zip(local_zip_path, config_path)
+                # dump config and add it to zipped deploy dir
+                config_path = str(Path(tmp_dir_name) / 'predictor_config.json')
+                with open(config_path, 'w') as f:
+                    json.dump(config, f)
+                add_file_to_zip(local_zip_path, config_path)
 
-            # add empty requirements.txt if it does not exist - it is mandatory
-            requirements_path = Path(deploy_dir) / "requirements.txt"
-            if not requirements_path.exists():
-                tmp_req_path = str(Path(tmp_dir_name) / 'requirements.txt')
-                open(tmp_req_path, 'w').close()
-                add_file_to_zip(local_zip_path, tmp_req_path)
+                # add empty requirements.txt if it does not exist - it is mandatory
+                requirements_path = Path(deploy_dir) / "requirements.txt"
+                if not requirements_path.exists():
+                    tmp_req_path = str(Path(tmp_dir_name) / 'requirements.txt')
+                    open(tmp_req_path, 'w').close()
+                    add_file_to_zip(local_zip_path, tmp_req_path)
 
-            # add or check main.py
-            main_path = Path(deploy_dir) / "main.py"
-            if main_path.exists():
-                with open(main_path, 'rt') as f:
-                    code = ''.join(f.readlines())
-                    assert '@app.post' in code, f"API {name} failed to deploy: @app.post not found in {main_path}! " \
-                                                f"main:app must be runnable by Uvicorn!"
-            else:
-                # add default main.py if it was not supplied
-                add_file_to_zip(local_zip_path, Path(__file__).parent / 'resources' / 'main.py')
-
-                predictor_filepath = Path(deploy_dir) / f"{predictor_path.replace('.', '/')}.py"
-                try:
-                    with open(predictor_filepath, 'rt') as f:
+                # add or check main.py
+                main_path = Path(deploy_dir) / "main.py"
+                if main_path.exists():
+                    with open(main_path, 'rt') as f:
                         code = ''.join(f.readlines())
-                        assert predictor_class_name in code, f"{predictor_class_name} not found in {predictor_filepath}!"
-                except Exception as e:
-                    raise RuntimeError(f"API {name} failed to deploy:") from e
+                        assert '@app.post' in code, f"API {name} failed to deploy: @app.post not found in {main_path}! " \
+                                                    f"main:app must be runnable by Uvicorn!"
+                else:
+                    # add default main.py if it was not supplied
+                    add_file_to_zip(local_zip_path, Path(__file__).parent / 'resources' / 'main.py')
 
-            s3.upload_file(local_zip_path, s3_path, bucket_name, bucket_sse_key, verbose=True)
+                    predictor_filepath = Path(deploy_dir) / f"{predictor_path.replace('.', '/')}.py"
+                    try:
+                        with open(predictor_filepath, 'rt') as f:
+                            code = ''.join(f.readlines())
+                            assert predictor_class_name in code, f"{predictor_class_name} not found in {predictor_filepath}!"
+                    except Exception as e:
+                        raise RuntimeError(f"API {name} failed to deploy:") from e
 
-            # add necessary env vars
-            if 'env' not in container:
-                container['env'] = {}
-            container["env"]['CSC_BUCKET_NAME'] = bucket_name
-            container["env"]['CSC_S3_SSE_KEY'] = bucket_sse_key
-            container["env"]['CSC_S3_SOURCE_ZIP_PATH'] = s3_path
-            container["env"]['CSC_UVICORN_PORT'] = port
-            container["env"]['CSC_PREDICTOR_PATH'] = predictor_path
-            container["env"]['CSC_PREDICTOR_CLASS_NAME'] = predictor_class_name
-            # so redeploy actually deploys the new code
-            container["env"]['CSC_HASH_OF_THE_CODE_DIR'] = get_file_hash(local_zip_path)
+                s3.upload_file(local_zip_path, s3_path, bucket_name, bucket_sse_key, verbose=True)
 
-            # env must be string -> string map
-            container['env'] = {str(k): str(v) for k, v in container['env'].items()}
+                # add necessary env vars
+                if 'env' not in container:
+                    container['env'] = {}
+                container["env"]['CSC_BUCKET_NAME'] = bucket_name
+                container["env"]['CSC_S3_SSE_KEY'] = bucket_sse_key
+                container["env"]['CSC_S3_SOURCE_ZIP_PATH'] = s3_path
+                container["env"]['CSC_UVICORN_PORT'] = port
+                container["env"]['CSC_PREDICTOR_PATH'] = predictor_path
+                container["env"]['CSC_PREDICTOR_CLASS_NAME'] = predictor_class_name
+                # so redeploy actually deploys the new code
+                container["env"]['CSC_HASH_OF_THE_CODE_DIR'] = get_file_hash(local_zip_path)
+
+                # env must be string -> string map
+                container['env'] = {str(k): str(v) for k, v in container['env'].items()}
         return deployment
 
     @staticmethod
