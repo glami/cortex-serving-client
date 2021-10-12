@@ -271,7 +271,7 @@ class CortexClient:
         for retry in range(n_retries + 1):
             try:
                 self._collect_garbage()
-                with str_to_public_temp_file(predictor_yaml_str, filepath):
+                with str_to_public_temp_file(predictor_yaml_str, filepath, self.lock):
                     gc_timeout_sec = deployment_timeout_sec + CORTEX_DELETE_TIMEOUT_SEC
                     logger.info(f"Deployment {name} has deployment timeout {deployment_timeout_sec}sec and GC timeout {gc_timeout_sec}sec.")
                     self._insert_or_update_gc_timeout(name, gc_timeout_sec)
@@ -747,13 +747,14 @@ def file_to_str(path: str) -> str:
 
 
 @contextlib.contextmanager
-def str_to_public_temp_file(string: str, filepath: str) -> str:
-    with open(filepath, "w+") as f:
-        f.write(string)
+def str_to_public_temp_file(string: str, filepath: str, lock: Lock) -> str:
+    with lock:
+        with open(filepath, "w+") as f:
+            f.write(string)
 
-    yield filepath
+        yield filepath
 
-    os.remove(filepath)
+        os.remove(filepath)
 
 
 def get_cortex_client_instance_with_pool(db_connection_pool: ThreadedConnectionPool, gc_interval_sec=15 * 60, cortex_env="aws"):
