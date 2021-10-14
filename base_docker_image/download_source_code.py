@@ -75,7 +75,8 @@ def main():
     # install requirements
     run_cmd(f"pip install -r requirements.txt")
     # run app
-    run_with_error_on_completion(f"uvicorn --no-access-log --workers 1 --host 0.0.0.0 --port {UVICORN_PORT} main:app")
+    run_with_error_on_completion(f"uvicorn --no-access-log --workers 1 --host 0.0.0.0 --port {UVICORN_PORT} "
+                                 f"--proxy-headers --forwarded-allow-ips '*' main:app")
 
 
 if __name__ == "__main__":
