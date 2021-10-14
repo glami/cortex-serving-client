@@ -1,10 +1,12 @@
 import importlib
 import json
 import os
+import re
 
-from fastapi import FastAPI, Body
+from fastapi import FastAPI
 from starlette import status
-from starlette.responses import PlainTextResponse
+from starlette.requests import Request
+from starlette.responses import PlainTextResponse, JSONResponse
 
 
 def get_class(module_path: str, class_name: str):
@@ -42,8 +44,8 @@ def healthz():
 
 
 @app.post("/")
-def handle_post_or_batch(payload=Body(...)):
-    response = app.predictor.predict(payload)
+def handle_post_or_batch(request: Request):
+    response = app.predictor.predict(request.state.payload)
     if response is not None:
         return response
 
@@ -51,3 +53,35 @@ def handle_post_or_batch(payload=Body(...)):
 @app.post("/on-job-complete")
 def on_job_complete():
     app.predictor.on_job_complete()
+
+
+@app.middleware("http")
+async def parse_payload(request: Request, call_next):
+    content_type = request.headers.get("content-type", "").lower()
+
+    if content_type.startswith("text/plain"):
+        try:
+            charset = "utf-8"
+            matches = re.findall(r"charset=(\S+)", content_type)
+            if len(matches) > 0:
+                charset = matches[-1].rstrip(";")
+            body = await request.body()
+            request.state.payload = body.decode(charset)
+        except Exception as e:
+            return PlainTextResponse(content=str(e), status_code=400)
+    elif content_type.startswith("multipart/form") or content_type.startswith(
+        "application/x-www-form-urlencoded"
+    ):
+        try:
+            request.state.payload = await request.form()
+        except Exception as e:
+            return PlainTextResponse(content=str(e), status_code=400)
+    elif content_type.startswith("application/json"):
+        try:
+            request.state.payload = await request.json()
+        except json.JSONDecodeError as e:
+            return JSONResponse(content={"error": str(e)}, status_code=400)
+    else:
+        request.state.payload = await request.body()
+
+    return await call_next(request)
