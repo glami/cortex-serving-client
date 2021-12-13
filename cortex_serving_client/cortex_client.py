@@ -67,6 +67,7 @@ JOB_STATUS_OOM = 'out_of_memory'
 JOB_STATUS_TIMED_OUT = 'timed_out'
 JOB_STATUS_STOPPED = 'stopped'
 JOB_STATUS_UNEXPECTED_STATUS = 'unexpected_status'
+# FIXME pending?
 
 JOB_FAIL_STATUSES = [
     JOB_STATUS_ENQUEUED_FAILED,
