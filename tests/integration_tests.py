@@ -4,6 +4,7 @@ import os
 import pickle
 from concurrent.futures import ThreadPoolExecutor
 from time import sleep
+from uuid import uuid4
 
 from cortex_serving_client import s3
 
@@ -86,6 +87,8 @@ class IntegrationTests(unittest.TestCase):
         ) as get_result:
             for _ in range(10):
                 logger.info(f"Sending request to test logging terminated correctly ...")
+                invalid_result = post(get_result.endpoint, data='invalid_json', headers={'content-type': 'application/json'})
+                self.assertEqual(invalid_result.status_code, 400)
                 result = post(get_result.endpoint, json={}).json()
                 sleep(1)
 
@@ -145,7 +148,7 @@ class IntegrationTests(unittest.TestCase):
     def test_deploy_no_predictor(self):
         deployment = self._get_deployment_dict("no-predictor-api")
 
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises(FileNotFoundError):
             with self.cortex.deploy_temporarily(
                     deployment,
                     deploy_dir="data/no_predictor_deployment",
@@ -208,12 +211,14 @@ class IntegrationTests(unittest.TestCase):
             'CSC_BUCKET_NAME': os.environ["CSC_BUCKET_NAME"],
             'CSC_S3_SSE_KEY': os.environ['CSC_S3_SSE_KEY']
         }
+        test_id = str(uuid4())
         deployment = self._get_deployment_dict("job-yes", env)
         deployment['kind'] = KIND_BATCH_API
         deployment["predictor_path"] = "batch_yes_predictor"
+        deployment['pod']['containers'][0]['config'] = dict(test_id=test_id)
 
         job_spec = {
-            "workers": 1,
+            "workers": 2,
             "item_list": {"items": [1, 2, 3, 4], "batch_size": 2},
         }
         job_result = self.cortex.deploy_batch_api_and_run_job(
@@ -226,6 +231,10 @@ class IntegrationTests(unittest.TestCase):
         )
         assert job_result.status == JOB_STATUS_SUCCEEDED
         self.assertEqual(self.cortex.get(deployment['name']).status, NOT_DEPLOYED_STATUS)
+
+        with io.BytesIO() as fp:
+            s3.download_fileobj(f'test/batch-yes/{test_id}.json', fp)
+            logger.info(f'read the test {test_id} {fp.read().decode()}')
 
         for batch in [[1, 2], [3, 4]]:
             s3_path = f'test/batch-yes/{sum(batch)}.json'
