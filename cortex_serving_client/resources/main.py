@@ -65,21 +65,10 @@ def on_job_complete():
 async def parse_payload(request: Request, call_next):
     content_type = request.headers.get("content-type", "").lower()
 
-    if request.url.path.endswith(ON_JOB_COMPLETE_PATH):
+    if request.url.path.endswith(ON_JOB_COMPLETE_PATH) or content_type.startswith("text/plain"):
         try:
             body = await get_text_body(content_type, request)
-            if body != JOB_COMPLETE_PAYLOAD:
-                logger.warning(f"Request job_complete does not have expected payload {JOB_COMPLETE_PAYLOAD}.")
-
             request.state.payload = body
-
-        except Exception as e:
-            log_exception(content_type, request)
-            return PlainTextResponse(content=str(e), status_code=400)
-
-    elif content_type.startswith("text/plain"):
-        try:
-            request.state.payload = get_text_body(content_type, request)
 
         except Exception as e:
             log_exception(content_type, request)
