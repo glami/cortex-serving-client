@@ -4,6 +4,7 @@ import os
 import pickle
 from concurrent.futures import ThreadPoolExecutor
 from time import sleep
+from unittest import skip
 from uuid import uuid4
 
 from cortex_serving_client import s3
@@ -56,6 +57,7 @@ class IntegrationTests(unittest.TestCase):
             "node_groups": ['ng-spot-1']
         }
 
+    @skip
     def test_thread_safety(self):
         def get_deploy_dict(a):
             deployment = IntegrationTests._get_deployment_dict("yes-api")
