@@ -17,10 +17,10 @@ Warning: Below is an experimental version. Automation will be added later.
 
 1. Update README.md to the newest version.
 
-1. Git-Tag the release and push the tag and the master branch.
-   - TODO GPG signed Tag? https://github.com/scikit-build/ninja-python-distributions/blob/master/docs/make_a_release.rst
    
 1. Execute and use your API token as a password:
    ```
    bash ./publish_to_pypi.sh ${new_version}; 
    ```
+   
+- TODO GPG signed Tag? https://github.com/scikit-build/ninja-python-distributions/blob/master/docs/make_a_release.rst

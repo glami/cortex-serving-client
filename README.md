@@ -9,7 +9,7 @@ Cortex has [official Python client now](https://pypi.org/project/cortex/) ([sour
 Main feature of this package is that you can use it on top of your codebase created for Cortex Version <= 0.34, meaning that:
  - deployment directory is automatically zipped and uploaded to S3 bucket
  - we prepared a base docker image that downloads this zipped code, unzips it and runs it in an Uvicorn worker
- - => you can simply deploy your `PythonPredictor` using Cortex 0.40 without having to wrap it inside your own docker image 
+ - => you can simply deploy your `PythonPredictor` using Cortex 0.42 without having to wrap it inside your own docker image 
 
 Additional features:
  - Automate your Cortex AWS cluster from Python.
