@@ -2,6 +2,9 @@
 
 <img src="https://raw.githubusercontent.com/glami/cortex-serving-client/master/cortex-serving-client-logo-2.svg" alt="Cortex Serving Client" style="max-width: 200px">
 
+
+## Warning: Cortex Labs joined Databricks and maintenance may end. Consider migrating to other tools.  
+
 Cortex Serving Client makes Python serving automation simple.
 It is a Python wrapper around [Cortex's command-line client](https://cortex.dev) that provides garbage API collection.
 Cortex has [official Python client now](https://pypi.org/project/cortex/) ([source](https://github.com/cortexlabs/cortex/blob/e22985f8516fe8db930aaecd05269da99d5e7a93/pkg/cortex/client/cortex/client.py)), but this project offers advanced features (GC, temporary deployment, timeouts) not present in the vanilla.

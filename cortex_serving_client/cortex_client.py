@@ -513,7 +513,7 @@ class CortexClient:
                 else:
                     return CortexGetResult(status_from_dict(first_json_dict['status']), first_json_dict['endpoint'], first_json_dict)
 
-        elif NOT_DEPLOYED in first_line:
+        elif NOT_DEPLOYED in out:
             return CortexGetResult(NOT_DEPLOYED_STATUS, None, dict())
 
         else:
