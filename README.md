@@ -1,6 +1,9 @@
-# Cortex Serving Client
+# Update: Cortex.dev bought by Databricks
 
-<img src="https://raw.githubusercontent.com/glami/cortex-serving-client/master/cortex-serving-client-logo-2.svg" alt="Cortex Serving Client" style="max-width: 200px">
+Consider migrating away from the Cortex.dev as it was bought by Databricks and is only maintained but not developed at the moment. Consider other options. You can do clusterless with directly EC2 wiht AWS cli scripsts, or Fargate. Or with cluster maintanance you can think about popular choice Terraform. For deploying consider using e.g. Kubernetes Python client.
+
+
+# Cortex Serving Client
 
 Cortex Serving Client makes Python serving automation simple.
 It is a Python wrapper around [Cortex's command-line client](https://cortex.dev) that provides garbage API collection.
